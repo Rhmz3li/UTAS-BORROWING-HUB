@@ -1,0 +1,84 @@
+{
+  "name": "utas-borrowing-hub-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "vite",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@reduxjs/toolkit": "^1.9.7",
+    "axios": "^1.13.2",
+    "axios-mock-adapter": "^2.1.0",
+    "bootstrap": "^5.3.8",
+    "formik": "^2.4.9",
+    "html5-qrcode": "^2.3.8",
+    "jest-dom": "^4.0.0",
+    "nodemailer": "^7.0.10",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^4.11.0",
+    "react-redux": "^8.1.3",
+    "react-router-dom": "^7.10.1",
+    "react-toastify": "^9.1.3",
+    "reactstrap": "^9.2.0",
+    "recharts": "^2.8.0",
+    "yup": "^1.3.3"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "babel-jest": "^30.2.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "react-test-renderer": "^18.3.1",
+    "redux-mock-store": "^1.5.5",
+    "vite": "^5.4.21"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "babel": {
+    "presets": [
+      ["@babel/preset-env", { "modules": "auto" }],
+      ["@babel/preset-react", { "runtime": "automatic" }]
+    ]
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/src/setupTests.js"],
+    "moduleNameMapper": {
+      "\\.(css|less|scss|sass)$": "identity-obj-proxy"
+    },
+    "transform": {
+      "^.+\\.(js|jsx)$": "babel-jest"
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(react-router|react-router-dom)/)"
+    ],
+    "moduleFileExtensions": ["js", "jsx", "json"],
+    "testMatch": [
+      "**/__tests__/**/*.(js|jsx)",
+      "**/*.(test|spec).(js|jsx)"
+    ]
+  }
+}
