@@ -1679,6 +1679,33 @@ app.put("/borrow/:id/return", async (req, res) => {
             });
         }
 
+        // Handle security deposit after return:
+        // - If no late/damage/loss -> refund deposit automatically
+        // - If there is a penalty or loss -> keep deposit as Completed (used to cover issues)
+        if (borrow.payment_id) {
+            const depositPayment = await PaymentModel.findById(borrow.payment_id);
+            if (depositPayment && depositPayment.payment_type === 'Resource') {
+                // No issues: on time, no damage, not lost -> refund
+                if (!hasLateReturn && !hasDamage && !isLost && depositPayment.status === 'Completed') {
+                    depositPayment.status = 'Refunded';
+                    depositPayment.updated_at = Date.now();
+                    depositPayment.processed_by = user._id;
+                    await depositPayment.save();
+
+                    await NotificationModel.create({
+                        user_id: borrow.user_id,
+                        title: 'Security Deposit Refunded',
+                        message: `Your security deposit of ${depositPayment.amount} OMR for "${resource.name}" has been refunded.`,
+                        type: 'Success',
+                        related_type: 'Payment',
+                        related_id: depositPayment._id
+                    });
+                }
+                // If there are issues (late/damage/loss), the deposit stays as Completed.
+                // Penalties remain Pending and can be paid via the normal penalties payment flow.
+            }
+        }
+
         res.status(200).json({ 
             success: true, 
             data: borrow,
@@ -2377,6 +2404,28 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
             });
         }
 
+        // If this borrow requires a security deposit, ensure payment is completed BEFORE approval
+        if (borrow.requires_payment && borrow.payment_amount > 0) {
+            if (!borrow.payment_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot approve borrow. Security deposit payment record not found.'
+                });
+            }
+
+            const depositPayment = await PaymentModel.findById(borrow.payment_id);
+            if (!depositPayment || depositPayment.status !== 'Completed') {
+                return res.status(402).json({
+                    success: false,
+                    message: 'Cannot approve borrow. Security deposit has not been confirmed yet. Please confirm the payment in Payments Management first.',
+                    depositStatus: depositPayment ? depositPayment.status : 'Missing'
+                });
+            }
+
+            // Mark borrow deposit as paid
+            borrow.payment_status = 'Paid';
+        }
+
         // BORROW APPROVAL: Update borrow status to Active and decrease quantity
         borrow.status = 'Active';
         borrow.borrow_date = new Date(); // Start borrow period from approval date
@@ -2393,15 +2442,7 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
         
         await resource.save();
 
-        // Update payment status if payment was made
-        if (borrow.payment_id) {
-            const payment = await PaymentModel.findById(borrow.payment_id);
-            if (payment && payment.status === 'Pending') {
-                payment.status = 'Completed';
-                payment.processed_by = admin._id;
-                await payment.save();
-            }
-        }
+        // Note: Deposit payment status is managed via Payments Management.
 
         // Update related reservations
         await ReservationModel.updateMany(
@@ -3001,6 +3042,100 @@ app.get("/admin/payments", async (req, res) => {
     }
 });
 
+// Allow user to complete a pending deposit/payment online (for Resource/Reservation payments)
+app.post("/payments/:id/pay-deposit", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ message: 'User not found' });
+        }
+
+        const { payment_method, transaction_id, notes, card_details } = req.body;
+        const payment = await PaymentModel.findById(req.params.id);
+
+        if (!payment) {
+            return res.status(404).json({ message: 'Payment not found' });
+        }
+
+        if (payment.user_id.toString() !== user._id.toString()) {
+            return res.status(403).json({ message: 'Not authorized to pay this record' });
+        }
+
+        if (payment.status !== 'Pending') {
+            return res.status(400).json({ message: 'Payment is not pending' });
+        }
+
+        // Update basic payment info
+        if (payment_method) {
+            payment.payment_method = payment_method;
+        }
+        if (transaction_id) {
+            payment.transaction_id = transaction_id;
+        }
+        if (notes) {
+            payment.notes = notes;
+        }
+
+        // Store limited card details if provided
+        if (card_details && card_details.card_number) {
+            const cardNumber = card_details.card_number || '';
+            payment.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
+            payment.card_holder = card_details.card_holder || '';
+            payment.card_expiry = card_details.expiry_date || '';
+        }
+
+        payment.status = 'Completed';
+        payment.processed_by = user._id;
+        payment.updated_at = Date.now();
+
+        // If this payment is linked to a penalty, mark it as paid
+        if (payment.penalty_id) {
+            const penalty = await PenaltyModel.findById(payment.penalty_id);
+            if (penalty && penalty.status === 'Pending') {
+                penalty.status = 'Paid';
+                penalty.paid_at = new Date();
+                await penalty.save();
+            }
+        }
+
+        // If this payment is for a resource borrow deposit, mark the borrow as deposit-paid
+        if (payment.payment_type === 'Resource') {
+            const relatedBorrow = await BorrowModel.findOne({ payment_id: payment._id });
+            if (relatedBorrow) {
+                relatedBorrow.payment_status = 'Paid';
+                relatedBorrow.updated_at = Date.now();
+                await relatedBorrow.save();
+            }
+        }
+
+        await payment.save();
+
+        await NotificationModel.create({
+            user_id: user._id,
+            title: 'Payment Confirmed',
+            message: `Your payment of ${payment.amount} OMR has been confirmed.`,
+            type: 'Success',
+            related_type: 'Payment',
+            related_id: payment._id
+        });
+
+        res.status(200).json({
+            success: true,
+            data: payment,
+            message: 'Payment completed successfully'
+        });
+    } catch (error) {
+        console.error('Pay deposit error:', error);
+        res.status(500).json({ message: error.message || 'Failed to complete payment' });
+    }
+});
+
 app.put("/admin/payments/:id/status", async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -3051,6 +3186,16 @@ app.put("/admin/payments/:id/status", async (req, res) => {
                     related_type: 'Payment',
                     related_id: payment._id
                 });
+            }
+
+            // If this is a resource security deposit, mark the related borrow deposit as paid
+            if (payment.payment_type === 'Resource') {
+                const relatedBorrow = await BorrowModel.findOne({ payment_id: payment._id });
+                if (relatedBorrow) {
+                    relatedBorrow.payment_status = 'Paid';
+                    relatedBorrow.updated_at = Date.now();
+                    await relatedBorrow.save();
+                }
             }
         } else if (status === 'Failed' && oldStatus === 'Completed') {
             // Revert penalty status if payment failed
@@ -3541,17 +3686,64 @@ app.get("/resources/scan/:code", async (req, res) => {
         }
 
         const { code } = req.params;
-        const resource = await ResourceModel.findOne({
+        let resource = await ResourceModel.findOne({
             $or: [{ barcode: code }, { qr_code: code }]
         });
-
-        if (!resource) {
-            return res.status(500).json({ message: "Resource not found" });
+        // Fallback: if code is 24 hex chars, treat as MongoDB _id (e.g. printed QR with _id)
+        if (!resource && /^[a-fA-F0-9]{24}$/.test(code)) {
+            resource = await ResourceModel.findById(code);
         }
 
-        res.send({ success: true, data: resource });
+        if (!resource) {
+            return res.status(404).json({ success: false, message: "Resource not found" });
+        }
+
+        // For admin/assistant: include active borrow (Active or Overdue) for scan & update status
+        let activeBorrow = null;
+        activeBorrow = await BorrowModel.findOne({
+            resource_id: resource._id,
+            status: { $in: ['Active', 'Overdue'] }
+        })
+            .populate('user_id', 'full_name email student_id')
+            .sort({ borrow_date: -1 })
+            .lean();
+
+        res.status(200).json({ success: true, data: resource, activeBorrow: activeBorrow || null });
     } catch (error) {
         res.send(error);
+    }
+});
+
+// Update resource status only (Maintenance, Available) – Admin/Assistant
+app.put("/resources/:id/status", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+        if (!user || !['Admin', 'Assistant'].includes(user.role)) {
+            return res.status(403).json({ message: 'Admin or Assistant required' });
+        }
+
+        const { status } = req.body;
+        if (!status || !['Maintenance', 'Available'].includes(status)) {
+            return res.status(400).json({ success: false, message: 'status must be Maintenance or Available' });
+        }
+
+        const resource = await ResourceModel.findById(req.params.id);
+        if (!resource) {
+            return res.status(404).json({ success: false, message: 'Resource not found' });
+        }
+
+        resource.status = status;
+        await resource.save();
+
+        res.status(200).json({ success: true, message: 'Status updated', data: resource });
+    } catch (error) {
+        console.error('Update resource status error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Failed to update status' });
     }
 });
 

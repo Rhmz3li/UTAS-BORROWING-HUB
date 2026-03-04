@@ -19,15 +19,15 @@
   "dependencies": {
     "bcrypt": "^5.1.1",
     "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "ignore-punycode-warning": "^1.0.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^7.8.8",
+    "mongoose": "^7.8.9",
     "nodemailer": "^7.0.10"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.1.14"
   }
 }
