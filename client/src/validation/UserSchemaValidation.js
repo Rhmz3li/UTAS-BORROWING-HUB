@@ -20,7 +20,10 @@ export const UserRegisterSchemaValidation = yup.object().shape({
             const commonPasswords = ['password', '12345678', 'qwerty', 'abc123', 'password123'];
             return !commonPasswords.some(common => value.toLowerCase().includes(common));
         }),
-    full_name: yup.string().required('Full name is required!!!'),
+    full_name: yup
+        .string()
+        .required('Full name is required!!!')
+        .matches(/^[A-Za-z\s]+$/, 'Full name must contain letters only (A–Z)'),
     confirmPassword: yup.string().oneOf([yup.ref('password'), null], 'Passwords must match').required('Please confirm your password'),
     role: yup.string().oneOf(['Student', 'Staff'], 'Invalid role selected'),
     student_id: yup.string().when('role', {
@@ -38,7 +41,9 @@ export const UserRegisterSchemaValidation = yup.object().shape({
         then: (schema) => schema.required('ID is required'),
         otherwise: (schema) => schema.notRequired()
     }),
-    phone: yup.string().matches(/^[0-9]{8}$/, 'Phone number must be 8 digits'),
+    phone: yup
+        .string()
+        .matches(/^[97][0-9]{7}$/, 'Phone number must be 8 digits, start with 9 or 7, and contain numbers only'),
     department: yup.string()
 });
 
