@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Alert, Spinner } from "reactstrap";
+import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Alert, Spinner, Modal, ModalHeader, ModalBody, ModalFooter, FormGroup, Label, Input } from "reactstrap";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import axios from 'axios';
@@ -12,6 +12,15 @@ const Payments = () => {
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
+    const [payModalOpen, setPayModalOpen] = useState(false);
+    const [selectedPayment, setSelectedPayment] = useState(null);
+    const [payData, setPayData] = useState({
+        card_number: '',
+        card_holder: '',
+        expiry_date: '',
+        cvv: '',
+        transaction_id: ''
+    });
 
     useEffect(() => {
         if (!user) {
@@ -40,6 +49,70 @@ const Payments = () => {
             toast.error('Failed to load payments');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const openPayModal = (payment) => {
+        setSelectedPayment(payment);
+        setPayData({
+            card_number: '',
+            card_holder: '',
+            expiry_date: '',
+            cvv: '',
+            transaction_id: ''
+        });
+        setPayModalOpen(true);
+    };
+
+    const handleConfirmPayDeposit = async () => {
+        if (!selectedPayment) return;
+
+        // Basic client-side validation for card data
+        const digitsOnly = payData.card_number.replace(/\s/g, '');
+        if (!digitsOnly || digitsOnly.length < 13 || digitsOnly.length > 16) {
+            toast.error('Please enter a valid card number (13–16 digits)');
+            return;
+        }
+        if (!payData.card_holder || payData.card_holder.trim().length < 2) {
+            toast.error('Please enter card holder name');
+            return;
+        }
+        if (!/^\d{2}\/\d{2}$/.test(payData.expiry_date || '')) {
+            toast.error('Please enter a valid expiry date (MM/YY)');
+            return;
+        }
+        if (!payData.cvv || payData.cvv.length < 3) {
+            toast.error('Please enter a valid CVV');
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post(
+                `http://localhost:5000/payments/${selectedPayment._id}/pay-deposit`,
+                {
+                    payment_method: 'Card',
+                    transaction_id: payData.transaction_id || undefined,
+                    notes: selectedPayment.notes || 'Online card deposit payment',
+                    card_details: {
+                        card_number: digitsOnly,
+                        card_holder: payData.card_holder.trim(),
+                        expiry_date: payData.expiry_date,
+                        cvv: payData.cvv
+                    }
+                },
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            );
+            toast.success('Payment completed successfully!');
+            setPayModalOpen(false);
+            setSelectedPayment(null);
+            fetchPayments();
+        } catch (error) {
+            console.error('Pay deposit error:', error);
+            const msg = error.response?.data?.message || 'Failed to complete payment';
+            toast.error(msg);
         }
     };
 
@@ -268,6 +341,7 @@ const Payments = () => {
                                         <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
                                         <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Transaction ID</th>
                                         <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Notes</th>
+                                        <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -307,6 +381,20 @@ const Payments = () => {
                                                     {payment.notes || '-'}
                                                 </span>
                                             </td>
+                                            <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
+                                                {payment.payment_type === 'Resource' && payment.status === 'Pending' ? (
+                                                    <Button
+                                                        color="primary"
+                                                        size="sm"
+                                                        onClick={() => openPayModal(payment)}
+                                                        style={{ fontWeight: '600', borderRadius: '8px' }}
+                                                    >
+                                                        Pay Deposit
+                                                    </Button>
+                                                ) : (
+                                                    <span style={{ color: '#999', fontSize: '0.85rem' }}>-</span>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -316,6 +404,104 @@ const Payments = () => {
                 </CardBody>
             </Card>
             </Container>
+
+            {/* Pay Deposit Modal */}
+            <Modal isOpen={payModalOpen} toggle={() => setPayModalOpen(false)}>
+                <ModalHeader toggle={() => setPayModalOpen(false)}>
+                    Pay Security Deposit
+                </ModalHeader>
+                <ModalBody>
+                    {selectedPayment && (
+                        <>
+                            <Alert color="info">
+                                <strong>Amount:</strong> {selectedPayment.amount?.toFixed(2) || '0.00'} OMR
+                                <br />
+                                <strong>For:</strong> {selectedPayment.notes || 'Security deposit'}
+                            </Alert>
+                            <FormGroup>
+                                <Label>Card Number *</Label>
+                                <Input
+                                    type="text"
+                                    maxLength="19"
+                                    value={payData.card_number}
+                                    onChange={(e) => {
+                                        const val = e.target.value.replace(/\s/g, '');
+                                        if (/^\d*$/.test(val) && val.length <= 16) {
+                                            // format as XXXX XXXX ...
+                                            const parts = val.match(/\d{1,4}/g) || [];
+                                            setPayData({ ...payData, card_number: parts.join(' ') });
+                                        }
+                                    }}
+                                    placeholder="1234 5678 9012 3456"
+                                />
+                            </FormGroup>
+                            <Row>
+                                <Col md={6}>
+                                    <FormGroup>
+                                        <Label>Card Holder *</Label>
+                                        <Input
+                                            type="text"
+                                            value={payData.card_holder}
+                                            onChange={(e) => setPayData({ ...payData, card_holder: e.target.value })}
+                                            placeholder="Name on card"
+                                        />
+                                    </FormGroup>
+                                </Col>
+                                <Col md={3}>
+                                    <FormGroup>
+                                        <Label>Expiry (MM/YY) *</Label>
+                                        <Input
+                                            type="text"
+                                            maxLength="5"
+                                            value={payData.expiry_date}
+                                            onChange={(e) => {
+                                                let v = e.target.value.replace(/\D/g, '');
+                                                if (v.length >= 2) {
+                                                    v = v.substring(0, 2) + '/' + v.substring(2, 4);
+                                                }
+                                                setPayData({ ...payData, expiry_date: v });
+                                            }}
+                                            placeholder="MM/YY"
+                                        />
+                                    </FormGroup>
+                                </Col>
+                                <Col md={3}>
+                                    <FormGroup>
+                                        <Label>CVV *</Label>
+                                        <Input
+                                            type="password"
+                                            maxLength="4"
+                                            value={payData.cvv}
+                                            onChange={(e) => {
+                                                const v = e.target.value.replace(/\D/g, '').substring(0, 4);
+                                                setPayData({ ...payData, cvv: v });
+                                            }}
+                                            placeholder="123"
+                                        />
+                                    </FormGroup>
+                                </Col>
+                            </Row>
+                            <FormGroup>
+                                <Label>Transaction ID (optional)</Label>
+                                <Input
+                                    type="text"
+                                    value={payData.transaction_id}
+                                    onChange={(e) => setPayData({ ...payData, transaction_id: e.target.value })}
+                                    placeholder="Reference from bank / gateway"
+                                />
+                            </FormGroup>
+                        </>
+                    )}
+                </ModalBody>
+                <ModalFooter>
+                    <Button color="secondary" onClick={() => setPayModalOpen(false)}>
+                        Cancel
+                    </Button>
+                    <Button color="primary" onClick={handleConfirmPayDeposit}>
+                        Pay Now
+                    </Button>
+                </ModalFooter>
+            </Modal>
         </div>
     );
 };

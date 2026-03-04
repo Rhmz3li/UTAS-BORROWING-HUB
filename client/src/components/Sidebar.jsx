@@ -19,10 +19,14 @@ import {
   FaUserGraduate,
   FaSignOutAlt,
   FaMoon,
-  FaSun
+  FaSun,
+  FaQrcode
 } from 'react-icons/fa';
 import { logout } from '../redux/reducers/authReducer.js';
 import { useTheme } from '../contexts/ThemeContext.jsx';
+import ResourceScanner from './ResourceScanner.jsx';
+import ScanAndUpdateStatus from './ScanAndUpdateStatus.jsx';
+import ScanResourceManagement from './ScanResourceManagement.jsx';
 
 const Sidebar = () => {
   const navigate = useNavigate();
@@ -31,6 +35,10 @@ const Sidebar = () => {
   const { user } = useSelector((state) => state.auth);
   const { unreadCount } = useSelector((state) => state.notifications || {});
   const { theme, toggleTheme, isDark } = useTheme();
+  const [scanMgmtModalOpen, setScanMgmtModalOpen] = React.useState(false);
+  const [scanModalOpen, setScanModalOpen] = React.useState(false);
+  const [scanUpdateModalOpen, setScanUpdateModalOpen] = React.useState(false);
+  const isAdmin = ['Admin', 'Assistant'].includes(user?.role);
 
   // Auto-refresh notifications when component mounts
   React.useEffect(() => {
@@ -74,6 +82,7 @@ const Sidebar = () => {
   const studentStaffMenu = [
     { path: '/home', label: 'Dashboard', icon: FaHome, section: 'main' },
     { path: '/resources', label: 'Browse Resources', icon: FaBox, section: 'main' },
+    { path: '/scan-mgmt', label: 'Scan Resource Management', icon: FaQrcode, section: 'main', action: 'scanMgmt' },
     { path: '/my-borrows', label: 'My Borrows', icon: FaBook, section: 'borrowing' },
     { path: '/reservations', label: 'My Reservations', icon: FaCalendarCheck, section: 'borrowing' },
     { path: '/notifications', label: 'Notifications', icon: FaBell, section: 'account' },
@@ -84,6 +93,7 @@ const Sidebar = () => {
   const adminMenu = [
     { path: '/admin/dashboard', label: 'Control Panel', icon: FaTachometerAlt, section: 'main' },
     { path: '/admin/resources', label: 'Resource Management', icon: FaBox, section: 'management' },
+    { path: '/admin/scan-mgmt', label: 'Scan Resource Management', icon: FaQrcode, section: 'management', action: 'scanMgmt' },
     { path: '/admin/users', label: 'User Management', icon: FaUsers, section: 'management', adminOnly: true },
     { path: '/admin/borrows', label: 'Borrow Management', icon: FaBook, section: 'management' },
     { path: '/admin/reservations', label: 'Reservation Management', icon: FaCalendarCheck, section: 'management' },
@@ -121,6 +131,7 @@ const Sidebar = () => {
   };
 
   return (
+    <>
     <div style={{
       width: '280px',
       minHeight: '100vh',
@@ -246,14 +257,20 @@ const Sidebar = () => {
               {/* Section Items */}
               {sectionItems.map((item) => {
                 const Icon = item.icon;
-                const active = isActive(item.path);
+                const active = (item.action === 'scanMgmt') ? false : isActive(item.path);
                 const isNotificationItem = item.path === '/notifications';
                 const hasUnread = isNotificationItem && unreadCount > 0;
                 
                 return (
                   <div
                     key={item.path}
-                    onClick={() => navigate(item.path)}
+                    onClick={() => {
+                      if (item.action === 'scanMgmt') {
+                        setScanMgmtModalOpen(true);
+                      } else {
+                        navigate(item.path);
+                      }
+                    }}
                     style={{
                       margin: '0.25rem 1rem',
                       padding: '0.875rem 1rem',
@@ -484,6 +501,16 @@ const Sidebar = () => {
         </div>
       </div>
     </div>
+    <ScanResourceManagement
+      isOpen={scanMgmtModalOpen}
+      toggle={() => setScanMgmtModalOpen(false)}
+      onScanResource={() => setScanModalOpen(true)}
+      onScanUpdateStatus={() => setScanUpdateModalOpen(true)}
+      isAdmin={isAdmin}
+    />
+    <ResourceScanner isOpen={scanModalOpen} toggle={() => setScanModalOpen(false)} />
+    <ScanAndUpdateStatus isOpen={scanUpdateModalOpen} toggle={() => setScanUpdateModalOpen(false)} />
+    </>
   );
 };
 

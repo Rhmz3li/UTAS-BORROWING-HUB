@@ -412,6 +412,11 @@ const AdminBorrows = () => {
                     const penalty = borrow.penalty || null;
                     const fineAmount = penalty?.fine_amount || 0;
                     const paymentStatus = penalty?.status || 'Not Required';
+
+                    const requiresDeposit = borrow.requires_payment && (borrow.payment_amount || 0) > 0;
+                    const depositAmount = requiresDeposit ? Math.min(borrow.payment_amount || 0, 10) : 0;
+                    const depositStatus = requiresDeposit ? (borrow.payment_status || 'Pending') : 'Not Required';
+                    const depositPaid = !requiresDeposit || depositStatus === 'Paid';
                     
                     return (
                       <tr key={borrow._id} style={isOverdue ? { background: '#fff3e0' } : {}}>
@@ -476,45 +481,87 @@ const AdminBorrows = () => {
                           )}
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                          {paymentStatus === 'Paid' ? (
-                            <Badge style={{
-                              background: '#e8f5e9',
-                              color: '#4caf50',
-                              padding: '0.4rem 0.8rem',
-                              borderRadius: '20px',
-                              fontSize: '0.85rem',
-                              fontWeight: '600',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.5rem',
-                              width: 'fit-content'
-                            }}>
-                              <FaCheckCircle style={{ fontSize: '0.8rem' }} />
-                              Paid
-                            </Badge>
-                          ) : paymentStatus === 'Pending' ? (
-                            <Badge style={{
-                              background: '#fff3e0',
-                              color: '#ff9800',
-                              padding: '0.4rem 0.8rem',
-                              borderRadius: '20px',
-                              fontSize: '0.85rem',
-                              fontWeight: '600',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.5rem',
-                              width: 'fit-content'
-                            }}>
-                              <FaClock style={{ fontSize: '0.8rem' }} />
-                              Pending
-                            </Badge>
-                          ) : (
+                          {requiresDeposit && (
+                            <div style={{ marginBottom: penalty ? '0.5rem' : 0 }}>
+                              <div style={{ fontSize: '0.8rem', color: '#555', marginBottom: '0.15rem' }}>
+                                Deposit: <strong>{depositAmount.toFixed(2)} OMR</strong>
+                              </div>
+                              <Badge style={{
+                                background: depositPaid ? '#e8f5e9' : '#fff3e0',
+                                color: depositPaid ? '#4caf50' : '#ff9800',
+                                padding: '0.3rem 0.7rem',
+                                borderRadius: '20px',
+                                fontSize: '0.8rem',
+                                fontWeight: '600',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                width: 'fit-content'
+                              }}>
+                                {depositPaid ? <FaCheckCircle style={{ fontSize: '0.8rem' }} /> : <FaClock style={{ fontSize: '0.8rem' }} />}
+                                {depositPaid ? 'Deposit Paid' : 'Deposit Pending'}
+                              </Badge>
+                            </div>
+                          )}
+                          {penalty && (
+                            <div>
+                              <div style={{ fontSize: '0.8rem', color: '#555', marginTop: requiresDeposit ? '0.35rem' : 0 }}>
+                                Penalty payment:
+                              </div>
+                              {paymentStatus === 'Paid' ? (
+                                <Badge style={{
+                                  background: '#e8f5e9',
+                                  color: '#4caf50',
+                                  padding: '0.3rem 0.7rem',
+                                  borderRadius: '20px',
+                                  fontSize: '0.8rem',
+                                  fontWeight: '600',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  width: 'fit-content'
+                                }}>
+                                  <FaCheckCircle style={{ fontSize: '0.8rem' }} />
+                                  Paid
+                                </Badge>
+                              ) : paymentStatus === 'Pending' ? (
+                                <Badge style={{
+                                  background: '#fff3e0',
+                                  color: '#ff9800',
+                                  padding: '0.3rem 0.7rem',
+                                  borderRadius: '20px',
+                                  fontSize: '0.8rem',
+                                  fontWeight: '600',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  width: 'fit-content'
+                                }}>
+                                  <FaClock style={{ fontSize: '0.8rem' }} />
+                                  Pending
+                                </Badge>
+                              ) : (
+                                <Badge style={{
+                                  background: '#f5f5f5',
+                                  color: '#999',
+                                  padding: '0.3rem 0.7rem',
+                                  borderRadius: '20px',
+                                  fontSize: '0.8rem',
+                                  fontWeight: '600',
+                                  width: 'fit-content'
+                                }}>
+                                  Not Required
+                                </Badge>
+                              )}
+                            </div>
+                          )}
+                          {!requiresDeposit && !penalty && (
                             <Badge style={{
                               background: '#f5f5f5',
                               color: '#999',
-                              padding: '0.4rem 0.8rem',
+                              padding: '0.3rem 0.7rem',
                               borderRadius: '20px',
-                              fontSize: '0.85rem',
+                              fontSize: '0.8rem',
                               fontWeight: '600',
                               width: 'fit-content'
                             }}>
@@ -528,9 +575,16 @@ const AdminBorrows = () => {
                               <>
                                 <Button
                                   size="sm"
-                                  onClick={() => handleApprove(borrow._id)}
+                                  onClick={() => {
+                                    if (!depositPaid && requiresDeposit) {
+                                      toast.error('Cannot approve. Security deposit has not been confirmed yet. Please confirm the payment in Payments Management.');
+                                      return;
+                                    }
+                                    handleApprove(borrow._id);
+                                  }}
+                                  disabled={requiresDeposit && !depositPaid}
                                   style={{ 
-                                    background: '#4caf50', 
+                                    background: requiresDeposit && !depositPaid ? '#c8e6c9' : '#4caf50', 
                                     border: 'none',
                                     borderRadius: '6px',
                                     padding: '0.4rem 0.8rem'

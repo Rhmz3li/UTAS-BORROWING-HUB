@@ -119,8 +119,23 @@ const TermsAndPrivacyModal = ({ isOpen, toggle, type }) => {
                             </p>
                             <ul style={{ color: '#666666', marginBottom: '1rem', lineHeight: '1.8', paddingLeft: '2rem' }}>
                                 <li>Verify your eligibility</li>
-                                <li>Manage reservations and returns</li>
-                                <li>Contact you about due dates or issues</li>
+                                <li>Manage reservations, borrows, returns, and penalties</li>
+                                <li>Contact you about due dates, issues, or security deposits</li>
+                            </ul>
+                        </div>
+
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <h5 style={{ color: '#1976d2', marginBottom: '0.75rem', fontWeight: '600' }}>
+                                Security Deposit (Insurance) Policy
+                            </h5>
+                            <p style={{ color: '#666666', marginBottom: '0.75rem', lineHeight: '1.8', paddingLeft: '1rem' }}>
+                                For some resources, UTAS Borrowing Hub may require a refundable security deposit (insurance) before your borrow request is approved.
+                            </p>
+                            <ul style={{ color: '#666666', marginBottom: '1rem', lineHeight: '1.8', paddingLeft: '2rem' }}>
+                                <li>The deposit amount is defined per resource and is capped at <strong>10 OMR</strong>.</li>
+                                <li>The deposit is recorded as a payment linked to your borrow record.</li>
+                                <li>If you return the resource on time and in good condition, the deposit can be fully refunded according to UTAS procedures.</li>
+                                <li>If there are penalties (late return, damage, or loss), they may be deducted from your deposit before any refund.</li>
                             </ul>
                         </div>
 
@@ -129,7 +144,7 @@ const TermsAndPrivacyModal = ({ isOpen, toggle, type }) => {
                                 Data Protection
                             </h5>
                             <p style={{ color: '#666666', marginBottom: '1rem', lineHeight: '1.8', paddingLeft: '1rem' }}>
-                                Your data is protected, not sold, and shared only with authorized UTAS departments when necessary.
+                                Your data is protected, not sold, and shared only with authorized UTAS departments when necessary (for example, to manage security deposits, penalties, or financial records).
                             </p>
                         </div>
 
@@ -138,7 +153,7 @@ const TermsAndPrivacyModal = ({ isOpen, toggle, type }) => {
                                 Policy Updates
                             </h5>
                             <p style={{ color: '#666666', marginBottom: '1rem', lineHeight: '1.8', paddingLeft: '1rem' }}>
-                                By using the website, you agree to our data practices and any future updates to this policy.
+                                By using the website, you agree to our data practices, including the handling of security deposits, and any future updates to this policy.
                             </p>
                         </div>
                     </div>

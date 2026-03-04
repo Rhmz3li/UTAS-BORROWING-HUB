@@ -113,7 +113,7 @@ const ResourceDetail = () => {
     }
 
     // Check if payment is required
-    if (resource.requires_payment && resource.payment_amount > 0) {
+    if (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) {
       if (!paymentMethod) {
         toast.error('Please select a payment method');
         return;
@@ -136,7 +136,11 @@ const ResourceDetail = () => {
       const result = await dispatch(addBorrowing({
         deviceId: resource._id,
         returnDate: dueDate.toISOString(),
-        conditionBefore: resource.condition || 'Good'
+        conditionBefore: resource.condition || 'Good',
+        paymentMethod: (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) ? paymentMethod : null,
+        paymentAmount: (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0))
+          ? Math.min(resource.payment_amount || 0, 10)
+          : 0
       })).unwrap();
       
       const location = resource.location || 'IT Borrowing Hub - Lab 2';
@@ -144,6 +148,13 @@ const ResourceDetail = () => {
         `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
         { autoClose: 6000 }
       );
+
+      // After browsing/borrowing, show a popup explaining how to pay the deposit (if required)
+      if (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) {
+        const depositAmount = Math.min(resource.payment_amount || 0, 10).toFixed(2);
+        // Guide the user directly to the Payments page to complete the deposit
+        navigate('/payments');
+      }
       setBorrowModal(false);
       setSelectedBorrowDate('');
       setTermsAccepted(false);
@@ -1086,6 +1097,38 @@ const ResourceDetail = () => {
                       </div>
                     </Col>
                   )}
+                  {(resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) && (
+                    <Col md={12}>
+                      <div style={{
+                        padding: '1.25rem',
+                        background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+                        borderRadius: '15px',
+                        border: '2px solid #90caf9',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '1rem',
+                        marginTop: '0.5rem'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <FaShieldAlt style={{ color: '#1976d2', fontSize: '1.6rem' }} />
+                          <div>
+                            <div style={{ fontSize: '0.9rem', color: '#1565c0', fontWeight: 600 }}>
+                              Security Deposit (refundable)
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: '#1565c0' }}>
+                              This deposit (up to 10 OMR) is required before your borrow request can be approved.
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#0d47a1' }}>
+                            {Math.min(resource.payment_amount || 0, 10).toFixed(2)} OMR
+                          </div>
+                        </div>
+                      </div>
+                    </Col>
+                  )}
                 </Row>
               </div>
 
@@ -1098,6 +1141,13 @@ const ResourceDetail = () => {
                       e.preventDefault();
                       e.stopPropagation();
                       console.log('Borrow button clicked');
+                      if (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) {
+                        const depositAmount = Math.min(resource.payment_amount || 0, 10).toFixed(2);
+                        window.alert(
+                          `This resource requires a refundable security deposit of ${depositAmount} OMR.\n\n` +
+                          `The deposit is held until the item is returned. Penalties for late return, damage, or loss may be deducted from this amount.`
+                        );
+                      }
                       const minDate = getMinDate();
                       console.log('Min date:', minDate);
                       setBorrowModal(true);
@@ -1331,7 +1381,7 @@ const ResourceDetail = () => {
               </div>
             </div>
 
-            {/* Payment Section */}
+            {/* Security Deposit Section */}
             {resource.requires_payment && resource.payment_amount > 0 && (
               <div className="mt-4" style={{ 
                 padding: '1.5rem', 
@@ -1341,11 +1391,20 @@ const ResourceDetail = () => {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
                   <FaShieldAlt style={{ color: '#1976d2', fontSize: '1.3rem', marginRight: '0.5rem' }} />
-                  <strong style={{ color: '#1976d2', fontSize: '1.1rem' }}>Payment Required</strong>
+                  <strong style={{ color: '#1976d2', fontSize: '1.1rem' }}>Security Deposit Required</strong>
                 </div>
                 <div style={{ marginBottom: '1rem', fontSize: '1.1rem', color: '#1565c0' }}>
-                  <strong>Amount: {resource.payment_amount} OMR</strong>
+                  <strong>Deposit amount: {Math.min(resource.payment_amount, 10).toFixed(2)} OMR</strong>
                 </div>
+                <div style={{ fontSize: '0.9rem', color: '#1565c0', marginBottom: '0.75rem', lineHeight: '1.6' }}>
+                  By borrowing this resource, you agree to the following security deposit conditions:
+                </div>
+                <ul style={{ fontSize: '0.85rem', color: '#1565c0', marginBottom: '1rem', paddingLeft: '1.5rem', lineHeight: '1.6' }}>
+                  <li>This amount (up to 10 OMR) is held as a <strong>refundable security deposit</strong>.</li>
+                  <li>Your borrow request will only be <strong>approved by the admin after this deposit is paid</strong>.</li>
+                  <li>Any penalties for <strong>late return, damage, or loss</strong> may be deducted from this deposit.</li>
+                  <li>Any remaining balance may be refunded according to UTAS procedures.</li>
+                </ul>
                 <FormGroup>
                   <Label style={{ fontWeight: '600', color: '#1976d2', marginBottom: '0.75rem' }}>
                     Select Payment Method *
@@ -1364,7 +1423,7 @@ const ResourceDetail = () => {
                   </Input>
                 </FormGroup>
                 <div style={{ fontSize: '0.85rem', color: '#1565c0', marginTop: '0.75rem', fontStyle: 'italic' }}>
-                  Payment will be processed by admin. You will receive a notification once payment is confirmed.
+                  This amount is held as a refundable security deposit and may be used to cover any penalties.
                 </div>
               </div>
             )}
@@ -1597,7 +1656,7 @@ const ResourceDetail = () => {
               </div>
             </div>
 
-            {/* Payment Section */}
+            {/* Security Deposit Section */}
             {resource.requires_payment && resource.payment_amount > 0 && (
               <div className="mt-4" style={{ 
                 padding: '1.5rem', 
@@ -1607,10 +1666,10 @@ const ResourceDetail = () => {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
                   <FaShieldAlt style={{ color: '#1976d2', fontSize: '1.3rem', marginRight: '0.5rem' }} />
-                  <strong style={{ color: '#1976d2', fontSize: '1.1rem' }}>Payment Required</strong>
+                  <strong style={{ color: '#1976d2', fontSize: '1.1rem' }}>Security Deposit Required</strong>
                 </div>
                 <div style={{ marginBottom: '1rem', fontSize: '1.1rem', color: '#1565c0' }}>
-                  <strong>Amount: {resource.payment_amount} OMR</strong>
+                  <strong>Deposit amount: {Math.min(resource.payment_amount, 10).toFixed(2)} OMR</strong>
                 </div>
                 <FormGroup>
                   <Label style={{ fontWeight: '600', color: '#1976d2', marginBottom: '0.75rem' }}>
@@ -1630,7 +1689,7 @@ const ResourceDetail = () => {
                   </Input>
                 </FormGroup>
                 <div style={{ fontSize: '0.85rem', color: '#1565c0', marginTop: '0.75rem', fontStyle: 'italic' }}>
-                  Payment will be processed by admin. You will receive a notification once payment is confirmed.
+                  This amount is held as a refundable security deposit and may be used to cover any penalties.
                 </div>
               </div>
             )}

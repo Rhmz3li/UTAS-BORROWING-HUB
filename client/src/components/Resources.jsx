@@ -23,7 +23,8 @@ const Resources = () => {
     const [borrowData, setBorrowData] = useState({
         due_date: '',
         condition_on_borrow: 'Good',
-        terms_accepted: false
+        terms_accepted: false,
+        payment_method: ''
     });
     const [reserveData, setReserveData] = useState({
         pickup_date: '',
@@ -94,8 +95,11 @@ const Resources = () => {
         setBorrowData({
             due_date: dueDate.toISOString().split('T')[0],
             condition_on_borrow: resource.condition || 'Good', // Use resource's current condition
-            terms_accepted: false
+            terms_accepted: false,
+            payment_method: ''
         });
+
+        // No popup here anymore; deposit info is shown inside the borrow modal itself
         setBorrowModal(true);
     };
 
@@ -183,13 +187,25 @@ const Resources = () => {
             return;
         }
 
+        const needsDeposit = selectedResource &&
+            (selectedResource.requires_payment || (selectedResource.payment_amount && selectedResource.payment_amount > 0));
+
+        if (needsDeposit && !borrowData.payment_method) {
+            toast.error('Please select a payment method for the security deposit');
+            return;
+        }
+
         try {
             setIsBorrowing(true);
             // Use Redux action to add borrowing - this will update Redux store
             await dispatch(addBorrowing({
                 deviceId: selectedResource._id,
                 returnDate: borrowData.due_date,
-                conditionBefore: borrowData.condition_on_borrow || 'Good'
+                conditionBefore: borrowData.condition_on_borrow || 'Good',
+                paymentMethod: needsDeposit ? borrowData.payment_method : null,
+                paymentAmount: needsDeposit
+                    ? Math.min(selectedResource.payment_amount || 0, 10)
+                    : 0
             })).unwrap();
 
             const location = selectedResource.location || 'IT Borrowing Hub - Lab 2';
@@ -202,9 +218,15 @@ const Resources = () => {
             setBorrowData({
                 due_date: '',
                 condition_on_borrow: 'Good',
-                terms_accepted: false
+                terms_accepted: false,
+                payment_method: ''
             });
             dispatch(fetchDevices()); // Refresh resources
+            
+            // If there is a security deposit, guide user directly to the Payments page
+            if (needsDeposit) {
+                navigate('/payments');
+            }
             // Don't navigate - the borrow is already added to Redux store and will appear in My Borrows page
         } catch (error) {
             console.error('Borrow error:', error);
@@ -482,6 +504,20 @@ const Resources = () => {
                                                         📍 {resource.location}
                                                     </Badge>
                                                 )}
+                                                {(resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) && (
+                                                    <Badge 
+                                                        color="warning"
+                                                        style={{ 
+                                                            fontSize: '0.75rem',
+                                                            padding: '0.35rem 0.65rem',
+                                                            background: '#fff3cd',
+                                                            color: '#856404',
+                                                            border: '1px solid #ffeeba'
+                                                        }}
+                                                    >
+                                                        💰 Deposit: {Math.min(resource.payment_amount || 0, 10).toFixed(2)} OMR
+                                                    </Badge>
+                                                )}
                                             </div>
                                             
                                             <div className="d-flex gap-2" style={{ marginTop: '0.5rem' }}>
@@ -654,6 +690,45 @@ const Resources = () => {
                                     required
                                 />
                             </FormGroup>
+
+                            {(selectedResource.requires_payment || (selectedResource.payment_amount && selectedResource.payment_amount > 0)) && (
+                                <div className="mt-3 p-3" style={{
+                                    background: '#e3f2fd',
+                                    borderRadius: '8px',
+                                    border: '2px solid #2196f3'
+                                }}>
+                                    <h6 style={{ color: '#1976d2', fontWeight: '600', marginBottom: '0.5rem' }}>
+                                        Security Deposit (refundable)
+                                    </h6>
+                                    <p className="small mb-2" style={{ color: '#1565c0' }}>
+                                        Deposit amount:{' '}
+                                        <strong>
+                                            {Math.min(selectedResource.payment_amount || 0, 10).toFixed(2)} OMR
+                                        </strong>
+                                    </p>
+                                    <p className="small mb-2" style={{ color: '#1565c0' }}>
+                                        This deposit is required before your borrow request can be approved. Penalties for late
+                                        return, damage, or loss may be deducted from this amount. Any remaining balance may be
+                                        refunded according to UTAS procedures.
+                                    </p>
+                                    <FormGroup>
+                                        <Label style={{ fontWeight: '600', color: '#1976d2' }}>
+                                            Payment Method *
+                                        </Label>
+                                        <Input
+                                            type="select"
+                                            value={borrowData.payment_method}
+                                            onChange={(e) => setBorrowData({ ...borrowData, payment_method: e.target.value })}
+                                        >
+                                            <option value="">Choose payment method...</option>
+                                            <option value="Cash">Cash</option>
+                                            <option value="Card">Card</option>
+                                            <option value="Online">Online</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                        </Input>
+                                    </FormGroup>
+                                </div>
+                            )}
 
                             <FormGroup>
                                 <Label for="condition" style={{ fontWeight: '600' }}>

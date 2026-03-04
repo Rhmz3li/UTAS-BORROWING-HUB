@@ -37,7 +37,9 @@ const AdminResources = () => {
     available_quantity: 1,
     barcode: '',
     qr_code: '',
-    image: ''
+    image: '',
+    requires_payment: false,
+    payment_amount: 0
   });
 
   useEffect(() => {
@@ -162,7 +164,9 @@ const AdminResources = () => {
       available_quantity: 1,
       barcode: '',
       qr_code: '',
-      image: ''
+      image: '',
+      requires_payment: false,
+      payment_amount: 0
     });
     setModalOpen(true);
   };
@@ -183,7 +187,11 @@ const AdminResources = () => {
       available_quantity: resource.available_quantity || 1,
       barcode: resource.barcode || '',
       qr_code: resource.qr_code || '',
-      image: resource.image || ''
+      image: resource.image || '',
+      requires_payment: !!resource.requires_payment,
+      payment_amount: typeof resource.payment_amount === 'number'
+        ? Math.min(Math.max(resource.payment_amount, 0), 10)
+        : 0
     });
     setModalOpen(true);
   };
@@ -852,6 +860,56 @@ const AdminResources = () => {
               </Col>
             </Row>
             <Row>
+              <Col md={12}>
+                <FormGroup check>
+                  <Label check>
+                    <Input
+                      type="checkbox"
+                      checked={formData.requires_payment}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          requires_payment: e.target.checked,
+                          payment_amount: e.target.checked ? (formData.payment_amount || 1) : 0
+                        })
+                      }
+                    />{' '}
+                    Require security deposit (refundable)
+                  </Label>
+                  <small className="text-muted d-block mt-1">
+                    If enabled, students must pay a security deposit before their borrow request is accepted.
+                  </small>
+                </FormGroup>
+              </Col>
+            </Row>
+            {formData.requires_payment && (
+              <Row className="mt-3">
+                <Col md={6}>
+                  <FormGroup>
+                    <Label>Security Deposit (OMR, max 10)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.1"
+                      value={formData.payment_amount}
+                      onChange={(e) => {
+                        let val = parseFloat(e.target.value);
+                        if (Number.isNaN(val)) val = 0;
+                        if (val < 0) val = 0;
+                        if (val > 10) val = 10;
+                        setFormData({ ...formData, payment_amount: val });
+                      }}
+                      required
+                    />
+                    <small className="text-muted">
+                      This amount (up to 10 OMR) will be held as a security deposit and can be used to cover penalties.
+                    </small>
+                  </FormGroup>
+                </Col>
+              </Row>
+            )}
+            <Row>
               <Col md={6}>
                 <FormGroup>
                   <Label>Location</Label>
@@ -929,6 +987,12 @@ const AdminResources = () => {
                 <p><strong>Max Borrow Days:</strong> {selectedResource.max_borrow_days}</p>
                 <p><strong>Barcode:</strong> {selectedResource.barcode || 'N/A'}</p>
                 <p><strong>QR Code:</strong> {selectedResource.qr_code || 'N/A'}</p>
+                <p>
+                  <strong>Security Deposit:</strong>{' '}
+                  {selectedResource.requires_payment && selectedResource.payment_amount > 0
+                    ? `${Math.min(selectedResource.payment_amount, 10).toFixed(2)} OMR`
+                    : 'No deposit required'}
+                </p>
               </Col>
               {selectedResource.description && (
                 <Col md={12}>
