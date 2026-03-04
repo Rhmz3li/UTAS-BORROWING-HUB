@@ -26,7 +26,8 @@ const BorrowSchema = mongoose.Schema({
     terms_accepted: {type: Boolean, required: false, default: false},
     terms_accepted_at: {type: Date, required: false, default: null},
     requires_payment: {type: Boolean, required: false, default: false},
-    payment_amount: {type: Number, required: false, default: 0, min: 0},
+    // Security deposit amount for this borrow (refundable), capped at 10 OMR
+    payment_amount: {type: Number, required: false, default: 0, min: 0, max: 10},
     payment_method: {type: String, required: false, enum: ['Cash', 'Card', 'Online', 'Bank Transfer', null], default: null},
     payment_status: {type: String, required: false, enum: ['Pending', 'Paid', 'Not Required'], default: 'Not Required'},
     payment_id: {type: mongoose.Schema.Types.ObjectId, ref: 'Payments', required: false, default: null},

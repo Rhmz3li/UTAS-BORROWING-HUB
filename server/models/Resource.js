@@ -18,7 +18,8 @@ const ResourceSchema = mongoose.Schema({
     total_quantity: {type: Number, required: false, default: 1, min: 1},
     available_quantity: {type: Number, required: false, default: 1, min: 0},
     requires_payment: {type: Boolean, required: false, default: false},
-    payment_amount: {type: Number, required: false, default: 0, min: 0},
+    // Used as a security deposit amount (refundable), capped at 10 OMR
+    payment_amount: {type: Number, required: false, default: 0, min: 0, max: 10},
     replacement_cost: {type: Number, required: false, default: 100, min: 0}, // Cost for loss penalty
     created_by: {type: mongoose.Schema.Types.ObjectId, ref: 'Users', required: true},
     created_at: {type: Date, required: false, default: Date.now},
