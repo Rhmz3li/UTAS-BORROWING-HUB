@@ -34,6 +34,13 @@ export const addBorrowing = createAsyncThunk("borrowing/addBorrowing", async (bo
             condition_on_borrow: borrowingData.conditionBefore,
             terms_accepted: true
         };
+        // Attach payment data when a security deposit is required
+        if (borrowingData.paymentMethod) {
+            apiData.payment_method = borrowingData.paymentMethod;
+        }
+        if (typeof borrowingData.paymentAmount === 'number') {
+            apiData.payment_amount = borrowingData.paymentAmount;
+        }
         const response = await axios.post("http://localhost:5000/borrow/checkout", apiData, {
             headers: { Authorization: `Bearer ${token}` }
         });
