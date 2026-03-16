@@ -80,6 +80,26 @@ const Payments = () => {
         if (!/^\d{2}\/\d{2}$/.test(payData.expiry_date || '')) {
             toast.error('Please enter a valid expiry date (MM/YY)');
             return;
+        } else {
+            // Check that expiry date is not in the past
+            const [mmStr, yyStr] = payData.expiry_date.split('/');
+            const month = parseInt(mmStr, 10);
+            const year = parseInt(yyStr, 10);
+
+            // Basic month range check
+            if (isNaN(month) || isNaN(year) || month < 1 || month > 12) {
+                toast.error('Please enter a valid expiry month (01–12)');
+                return;
+            }
+
+            const now = new Date();
+            const currentYear = now.getFullYear() % 100; // last two digits
+            const currentMonth = now.getMonth() + 1; // 1-12
+
+            if (year < currentYear || (year === currentYear && month < currentMonth)) {
+                toast.error('Card expiry date cannot be in the past');
+                return;
+            }
         }
         if (!payData.cvv || payData.cvv.length < 3) {
             toast.error('Please enter a valid CVV');

@@ -21,6 +21,7 @@ import AdminUsers from './components/AdminUsers.jsx';
 import AdminPayments from './components/AdminPayments.jsx';
 import AdminPenalties from './components/AdminPenalties.jsx';
 import AdminReports from './components/AdminReports.jsx';
+import NotificationSettings from './components/NotificationSettings.jsx';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Container, Row, Col } from 'reactstrap';
 import Header from './components/Header.jsx';
@@ -32,6 +33,7 @@ import { fetchProfile } from './redux/reducers/authReducer';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useTheme } from './contexts/ThemeContext.jsx';
+import ChatBotWidget from './components/ChatBotWidget.jsx';
 
 function App() {
     const dispatch = useDispatch();
@@ -123,6 +125,16 @@ function App() {
                         <>
                             <Sidebar />
                             <Profile />
+                        </>
+                    ) : (
+                        <Navigate to="/login" />
+                    )
+                } />
+                <Route path="/notification-settings" element={
+                    email ? (
+                        <>
+                            <Sidebar />
+                            <NotificationSettings />
                         </>
                     ) : (
                         <Navigate to="/login" />
@@ -258,6 +270,8 @@ function App() {
                 pauseOnHover
                 theme={theme}
             />
+            {/* Global student assistant chat bot */}
+            {email && <ChatBotWidget />}
         </>
     );
 }

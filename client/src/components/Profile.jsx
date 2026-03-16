@@ -332,46 +332,46 @@ const Profile = () => {
                                         </div>
                                         My Profile
                                     </CardTitle>
-                                    <Button
-                                        type="button"
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            if (hasChanges) {
-                                                if (window.confirm('You have unsaved changes. Are you sure you want to leave?')) {
-                                                    // Navigate to dashboard based on user role
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                        <Button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                if (hasChanges) {
+                                                    if (window.confirm('You have unsaved changes. Are you sure you want to leave?')) {
+                                                        if (user?.role === 'Admin' || user?.role === 'Assistant') {
+                                                            navigate('/admin/dashboard');
+                                                        } else {
+                                                            navigate('/home');
+                                                        }
+                                                    }
+                                                } else {
                                                     if (user?.role === 'Admin' || user?.role === 'Assistant') {
                                                         navigate('/admin/dashboard');
                                                     } else {
                                                         navigate('/home');
                                                     }
                                                 }
-                                            } else {
-                                                // Navigate to dashboard based on user role
-                                                if (user?.role === 'Admin' || user?.role === 'Assistant') {
-                                                    navigate('/admin/dashboard');
-                                                } else {
-                                                    navigate('/home');
-                                                }
-                                            }
-                                        }}
-                                        style={{
-                                            background: 'var(--bg-tertiary)',
-                                            color: 'var(--text-primary)',
-                                            border: '2px solid var(--border-color)',
-                                            borderRadius: '10px',
-                                            padding: '0.5rem 1rem',
-                                            fontWeight: '600',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem',
-                                            cursor: 'pointer',
-                                            position: 'relative',
-                                            zIndex: 10
-                                        }}
-                                    >
-                                        <FaArrowLeft /> Back
-                                    </Button>
+                                            }}
+                                            style={{
+                                                background: 'var(--bg-tertiary)',
+                                                color: 'var(--text-primary)',
+                                                border: '2px solid var(--border-color)',
+                                                borderRadius: '10px',
+                                                padding: '0.5rem 1rem',
+                                                fontWeight: '600',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                cursor: 'pointer',
+                                                position: 'relative',
+                                                zIndex: 10
+                                            }}
+                                        >
+                                            <FaArrowLeft /> Back
+                                        </Button>
+                                    </div>
                                 </div>
 
                                 <Form onSubmit={handleSubmit} style={{ position: 'relative', zIndex: 1, pointerEvents: 'auto' }}>
@@ -513,7 +513,7 @@ const Profile = () => {
                                                     Department
                                                 </Label>
                                                 <Input
-                                                    type="text"
+                                                    type="select"
                                                     name="department"
                                                     id="department"
                                                     value={formData.department || ''}
@@ -521,14 +521,7 @@ const Profile = () => {
                                                         const value = e.target.value;
                                                         handleInputChange('department', value);
                                                     }}
-                                                    onInput={(e) => {
-                                                        const value = e.target.value;
-                                                        handleInputChange('department', value);
-                                                    }}
-                                                    placeholder="Enter your department"
                                                     disabled={isSaving}
-                                                    readOnly={false}
-                                                    autoComplete="off"
                                                     style={{
                                                         borderRadius: '10px',
                                                         border: '2px solid var(--input-border)',
@@ -541,9 +534,15 @@ const Profile = () => {
                                                         zIndex: 1000,
                                                         WebkitUserSelect: 'text',
                                                         userSelect: 'text',
-                                                        cursor: 'text'
+                                                        cursor: 'pointer'
                                                     }}
-                                                />
+                                                >
+                                                    <option value="">Select your department</option>
+                                                    <option value="College of Information Technology">College of Information Technology</option>
+                                                    <option value="College of Engineering and Technology">College of Engineering and Technology</option>
+                                                    <option value="College of Business Studies">College of Business Studies</option>
+                                                    <option value="College of Education">College of Education</option>
+                                                </Input>
                                             </FormGroup>
                                         </Col>
                                     </Row>

@@ -21,6 +21,18 @@ const UserSchema = mongoose.Schema({
     }],
     terms_accepted: {type: Boolean, required: false, default: false},
     terms_accepted_at: {type: Date, required: false, default: null},
+    // Notification preferences: which types to receive, and via In-App and/or Email
+    notificationPreferences: {
+        type: mongoose.Schema.Types.Mixed,
+        default: () => ({
+            borrowApproval: { inApp: true, email: true },
+            borrowRejection: { inApp: true, email: true },
+            dueDateReminder: { inApp: true, email: true },
+            reservationConfirmation: { inApp: true, email: true },
+            reservationAvailable: { inApp: true, email: true },
+            penalty: { inApp: true, email: true }
+        })
+    },
     created_at: {type: Date, required: false, default: Date.now},
     updated_at: {type: Date, required: false, default: Date.now}
 }, {

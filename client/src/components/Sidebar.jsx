@@ -86,6 +86,7 @@ const Sidebar = () => {
     { path: '/my-borrows', label: 'My Borrows', icon: FaBook, section: 'borrowing' },
     { path: '/reservations', label: 'My Reservations', icon: FaCalendarCheck, section: 'borrowing' },
     { path: '/notifications', label: 'Notifications', icon: FaBell, section: 'account' },
+    { path: '/notification-settings', label: 'Notification Settings', icon: FaCog, section: 'account' },
     { path: '/penalties', label: 'My Penalties', icon: FaExclamationTriangle, section: 'account' },
     { path: '/payments', label: 'My Payments', icon: FaCreditCard, section: 'account' }
   ];

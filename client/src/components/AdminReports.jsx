@@ -2,6 +2,7 @@ import { Container, Row, Col, Card, CardBody, CardTitle, Button, Input, InputGro
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE } from '../config';
 import { 
   FaChartBar, FaDownload, FaFilePdf, FaFileExcel, FaFileCsv, FaCalendarAlt, 
   FaComments, FaBullhorn, FaArrowUp, FaArrowDown, FaUsers, FaBox, FaBookOpen,
@@ -15,11 +16,22 @@ const AdminReports = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('analytics');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    search: '',
+    category: '',
+    resourceStatus: '',
+    department: '',
+    userRole: '',
+    borrowStatus: '',
+    paymentStatus: ''
+  });
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [calendarEvents, setCalendarEvents] = useState([]);
   
   // Analytics Data
   const [analyticsData, setAnalyticsData] = useState(null);
+  const [borrowDetails, setBorrowDetails] = useState([]);
   const [mostBorrowed, setMostBorrowed] = useState([]);
   const [departmentStats, setDepartmentStats] = useState([]);
   const [userTrends, setUserTrends] = useState([]);
@@ -49,26 +61,40 @@ const AdminReports = () => {
   }, [dateRange]);
 
 
-  const fetchAnalytics = async () => {
+  const buildAnalyticsParams = (overrides = null) => {
+    if (overrides) return overrides;
+    return {
+      ...(dateRange.start && { startDate: dateRange.start }),
+      ...(dateRange.end && { endDate: dateRange.end }),
+      ...(filters.search && { search: filters.search.trim() }),
+      ...(filters.category && { category: filters.category }),
+      ...(filters.resourceStatus && { resourceStatus: filters.resourceStatus }),
+      ...(filters.department && { department: filters.department }),
+      ...(filters.userRole && { userRole: filters.userRole }),
+      ...(filters.borrowStatus && { borrowStatus: filters.borrowStatus }),
+      ...(filters.paymentStatus && { paymentStatus: filters.paymentStatus })
+    };
+  };
+
+  const fetchAnalytics = async (overrideParams = null) => {
     try {
       setLoading(true);
       
       const token = localStorage.getItem('token');
-      const params = {
-        ...(dateRange.start && { startDate: dateRange.start }),
-        ...(dateRange.end && { endDate: dateRange.end })
-      };
+      const params = buildAnalyticsParams(overrideParams);
 
-      const response = await axios.get('http://localhost:5000/admin/reports/analytics', {
+      const response = await axios.get(`${API_BASE}/admin/reports/analytics`, {
         headers: { Authorization: `Bearer ${token}` },
         params
       });
 
       if (response.data.success) {
-        setAnalyticsData(response.data.data);
-        setMostBorrowed(response.data.data.mostBorrowed || []);
-        setDepartmentStats(response.data.data.departmentStats || []);
-        setUserTrends(response.data.data.userTrends || []);
+        const d = response.data.data;
+        setAnalyticsData(d);
+        setMostBorrowed(d.mostBorrowed || []);
+        setDepartmentStats(d.departmentStats || []);
+        setUserTrends(d.userTrends || []);
+        setBorrowDetails(d.borrowDetails || []);
       }
     } catch (error) {
       console.error('Analytics error:', error);
@@ -78,10 +104,30 @@ const AdminReports = () => {
     }
   };
 
+  const applyFilter = () => {
+    setFilterPanelOpen(false);
+    fetchAnalytics();
+  };
+
+  const resetFilter = () => {
+    setDateRange({ start: '', end: '' });
+    setFilters({
+      search: '',
+      category: '',
+      resourceStatus: '',
+      department: '',
+      userRole: '',
+      borrowStatus: '',
+      paymentStatus: ''
+    });
+    setFilterPanelOpen(false);
+    fetchAnalytics({}); // refetch with empty params immediately
+  };
+
   const fetchCalendarEvents = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/admin/calendar', {
+      const response = await axios.get(`${API_BASE}/admin/calendar`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -97,7 +143,7 @@ const AdminReports = () => {
   const fetchFeedbacks = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/admin/feedback', {
+      const response = await axios.get(`${API_BASE}/admin/feedback`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -113,7 +159,7 @@ const AdminReports = () => {
   const fetchAnnouncements = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/admin/announcements', {
+      const response = await axios.get(`${API_BASE}/admin/announcements`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -265,10 +311,17 @@ const AdminReports = () => {
       const params = {
         format,
         ...(dateRange.start && { startDate: dateRange.start }),
-        ...(dateRange.end && { endDate: dateRange.end })
+        ...(dateRange.end && { endDate: dateRange.end }),
+        ...(filters.search && { search: filters.search.trim() }),
+        ...(filters.category && { category: filters.category }),
+        ...(filters.resourceStatus && { resourceStatus: filters.resourceStatus }),
+        ...(filters.department && { department: filters.department }),
+        ...(filters.userRole && { userRole: filters.userRole }),
+        ...(filters.borrowStatus && { borrowStatus: filters.borrowStatus }),
+        ...(filters.paymentStatus && { paymentStatus: filters.paymentStatus })
       };
 
-      const response = await axios.get('http://localhost:5000/admin/reports/export', {
+      const response = await axios.get(`${API_BASE}/admin/reports/export`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
         responseType: 'blob'
@@ -317,7 +370,7 @@ const AdminReports = () => {
       }
 
       const token = localStorage.getItem('token');
-      await axios.put(`http://localhost:5000/admin/feedback/${selectedFeedback._id}/respond`, {
+      await axios.put(`${API_BASE}/admin/feedback/${selectedFeedback._id}/respond`, {
         response: responseText,
         status: 'Reviewed'
       }, {
@@ -360,7 +413,7 @@ const AdminReports = () => {
       }
 
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5000/admin/announcements', announcementForm, {
+      await axios.post(`${API_BASE}/admin/announcements`, announcementForm, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -593,38 +646,186 @@ const AdminReports = () => {
         </Col>
       </Row>
 
-      {/* Date Range Filter */}
+      {/* Advanced Filter - Analytics tab */}
       {activeTab === 'analytics' && (
-        <Row className="mb-4">
-          <Col md={4}>
-            <InputGroup>
-              <InputGroupText>Start Date</InputGroupText>
-              <Input
-                type="date"
-                value={dateRange.start}
-                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              />
-            </InputGroup>
-          </Col>
-          <Col md={4}>
-            <InputGroup>
-              <InputGroupText>End Date</InputGroupText>
-              <Input
-                type="date"
-                value={dateRange.end}
-                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              />
-            </InputGroup>
-          </Col>
-          <Col md={4}>
-            <Button
-              onClick={fetchAnalytics}
-              style={{ background: '#1976d2', border: 'none', width: '100%' }}
-            >
-              <FaFilter /> Apply Filter
-            </Button>
-          </Col>
-        </Row>
+        <div className="mb-4">
+          <Button
+            onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+            style={{ background: '#1976d2', border: 'none' }}
+          >
+            <FaFilter className="me-2" />
+            {filterPanelOpen ? 'Hide Filter' : 'Filter'}
+          </Button>
+
+          {filterPanelOpen && (
+            <Card className="mt-3 border shadow-sm">
+              <CardBody>
+                <CardTitle tag="h6" className="mb-3 d-flex align-items-center">
+                  <FaSearch className="me-2" /> Advanced Filter
+                </CardTitle>
+
+                {/* Search by resource / user */}
+                <Row className="mb-3">
+                  <Col md={12}>
+                    <InputGroup>
+                      <InputGroupText><FaSearch /> Search</InputGroupText>
+                      <Input
+                        type="text"
+                        placeholder="Resource name, user name, resource number, Barcode / QR"
+                        value={filters.search}
+                        onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                      />
+                    </InputGroup>
+                    <small className="text-muted">Search by: resource name, user name, resource number, Barcode/QR</small>
+                  </Col>
+                </Row>
+
+                {/* Dropdowns row 1: Category, Resource Status, Department */}
+                <Row className="mb-3">
+                  <Col md={4}>
+                    <InputGroup>
+                      <InputGroupText>Category</InputGroupText>
+                      <select
+                        className="form-select"
+                        value={filters.category}
+                        onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+                      >
+                        <option value="">All</option>
+                        <option value="Laptop">Laptop</option>
+                        <option value="Book">Book</option>
+                        <option value="Lab Equipment">Lab Equipment</option>
+                        <option value="Tablet">Tablet</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </InputGroup>
+                  </Col>
+                  <Col md={4}>
+                    <InputGroup>
+                      <InputGroupText>Resource Status</InputGroupText>
+                      <select
+                        className="form-select"
+                        value={filters.resourceStatus}
+                        onChange={(e) => setFilters({ ...filters, resourceStatus: e.target.value })}
+                      >
+                        <option value="">All</option>
+                        <option value="Available">Available</option>
+                        <option value="Borrowed">Borrowed</option>
+                        <option value="Returned">Returned</option>
+                        <option value="Overdue">Overdue</option>
+                        <option value="Reserved">Reserved</option>
+                        <option value="Maintenance">Maintenance</option>
+                      </select>
+                    </InputGroup>
+                  </Col>
+                  <Col md={4}>
+                    <InputGroup>
+                      <InputGroupText>Department</InputGroupText>
+                      <select
+                        className="form-select"
+                        value={filters.department}
+                        onChange={(e) => setFilters({ ...filters, department: e.target.value })}
+                      >
+                        <option value="">All</option>
+                        <option value="IT">IT</option>
+                        <option value="Business">Business</option>
+                        <option value="Engineering">Engineering</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </InputGroup>
+                  </Col>
+                </Row>
+
+                {/* Dropdowns row 2: User Role, Borrow Status, Payment Status */}
+                <Row className="mb-3">
+                  <Col md={4}>
+                    <InputGroup>
+                      <InputGroupText>User Role</InputGroupText>
+                      <select
+                        className="form-select"
+                        value={filters.userRole}
+                        onChange={(e) => setFilters({ ...filters, userRole: e.target.value })}
+                      >
+                        <option value="">All</option>
+                        <option value="Student">Student</option>
+                        <option value="Staff">Staff</option>
+                        <option value="Assistant">Assistant</option>
+                        <option value="Admin">Admin</option>
+                      </select>
+                    </InputGroup>
+                  </Col>
+                  <Col md={4}>
+                    <InputGroup>
+                      <InputGroupText>Borrow Status</InputGroupText>
+                      <select
+                        className="form-select"
+                        value={filters.borrowStatus}
+                        onChange={(e) => setFilters({ ...filters, borrowStatus: e.target.value })}
+                      >
+                        <option value="">All</option>
+                        <option value="Active">Active</option>
+                        <option value="Returned">Returned</option>
+                        <option value="Overdue">Overdue</option>
+                        <option value="Reserved">Reserved</option>
+                      </select>
+                    </InputGroup>
+                  </Col>
+                  <Col md={4}>
+                    <InputGroup>
+                      <InputGroupText>Payment Status</InputGroupText>
+                      <select
+                        className="form-select"
+                        value={filters.paymentStatus}
+                        onChange={(e) => setFilters({ ...filters, paymentStatus: e.target.value })}
+                      >
+                        <option value="">All</option>
+                        <option value="Paid">Paid</option>
+                        <option value="Unpaid">Unpaid</option>
+                        <option value="Refunded">Refunded</option>
+                        <option value="Completed">Completed</option>
+                      </select>
+                    </InputGroup>
+                  </Col>
+                </Row>
+
+                {/* Date range */}
+                <Row className="mb-3">
+                  <Col md={6}>
+                    <InputGroup>
+                      <InputGroupText>Start Date</InputGroupText>
+                      <Input
+                        type="date"
+                        value={dateRange.start}
+                        onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                      />
+                    </InputGroup>
+                  </Col>
+                  <Col md={6}>
+                    <InputGroup>
+                      <InputGroupText>End Date</InputGroupText>
+                      <Input
+                        type="date"
+                        value={dateRange.end}
+                        onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                      />
+                    </InputGroup>
+                  </Col>
+                </Row>
+
+                {/* Actions */}
+                <Row>
+                  <Col className="d-flex gap-2">
+                    <Button onClick={applyFilter} style={{ background: '#1976d2', border: 'none' }}>
+                      <FaFilter className="me-2" /> Apply Filter
+                    </Button>
+                    <Button onClick={resetFilter} color="secondary" outline>
+                      Reset
+                    </Button>
+                  </Col>
+                </Row>
+              </CardBody>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* Analytics Tab */}
@@ -729,48 +930,53 @@ const AdminReports = () => {
             </Col>
           </Row>
 
-          {/* User Trends */}
-          <Row>
+          {/* Detailed Borrow List (respects all filters) */}
+          <Row className="mb-4">
             <Col>
               <Card className="border-0 shadow-sm">
                 <CardBody>
-                  <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1rem' }}>
-                    User Trends
+                  <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
+                    Borrow Details (Filtered)
                   </CardTitle>
-                  <Table hover>
+                  <p style={{ fontSize: '0.85rem', color: '#777' }}>
+                    This table shows all borrow transactions that match the selected filters (e.g. User Role, Department, Category, Borrow Status, Date Range). Up to the latest 200 records are displayed.
+                  </p>
+                  <Table hover responsive size="sm">
                     <thead>
                       <tr>
-                        <th>Period</th>
-                        <th>New Users</th>
-                        <th>Active Users</th>
-                        <th>Borrows</th>
-                        <th>Trend</th>
+                        <th>#</th>
+                        <th>User</th>
+                        <th>Role</th>
+                        <th>Department</th>
+                        <th>Resource</th>
+                        <th>Category</th>
+                        <th>Borrow Status</th>
+                        <th>Payment Status</th>
+                        <th>Borrow Date</th>
+                        <th>Due Date</th>
+                        <th>Return Date</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {userTrends.length > 0 ? (
-                        userTrends.map((trend, idx) => (
-                          <tr key={idx}>
-                            <td>{trend.period}</td>
-                            <td><strong>{trend.newUsers}</strong></td>
-                            <td><strong>{trend.activeUsers}</strong></td>
-                            <td><strong>{trend.borrows}</strong></td>
-                            <td>
-                              {trend.trend > 0 ? (
-                                <span style={{ color: '#4caf50' }}>
-                                  <FaArrowUp /> +{trend.trend}%
-                                </span>
-                              ) : (
-                                <span style={{ color: '#f44336' }}>
-                                  <FaArrowDown /> {trend.trend}%
-                                </span>
-                              )}
-                            </td>
+                      {borrowDetails && borrowDetails.length > 0 ? (
+                        borrowDetails.map((b, idx) => (
+                          <tr key={b._id || idx}>
+                            <td>{idx + 1}</td>
+                            <td>{b.user_id?.full_name || 'N/A'}</td>
+                            <td>{b.user_id?.role || 'N/A'}</td>
+                            <td>{b.user_id?.department || 'N/A'}</td>
+                            <td>{b.resource_id?.name || 'N/A'}</td>
+                            <td>{b.resource_id?.category || 'N/A'}</td>
+                            <td>{b.status || 'N/A'}</td>
+                            <td>{b.payment_status || 'Not Required'}</td>
+                            <td>{b.borrow_date ? new Date(b.borrow_date).toLocaleDateString() : 'N/A'}</td>
+                            <td>{b.due_date ? new Date(b.due_date).toLocaleDateString() : 'N/A'}</td>
+                            <td>{b.return_date ? new Date(b.return_date).toLocaleDateString() : '-'}</td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="5" className="text-center">No data available</td>
+                          <td colSpan="11" className="text-center">No records found for the selected filters.</td>
                         </tr>
                       )}
                     </tbody>

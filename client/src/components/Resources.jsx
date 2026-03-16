@@ -76,6 +76,19 @@ const Resources = () => {
         return matchesSearch && matchesCategory && resource.status === 'Available';
     }) : [];
 
+    // Split resources into:
+    // - departmentResources: تخص قسم الطالب نفسه
+    // - sharedResources: موارد بدون قسم محدد (مشتركة بين كل الأقسام)
+    const userDepartment = (user?.department || '').trim().toLowerCase();
+    const departmentResources = filteredResources.filter((resource) => {
+        const resourceDept = (resource.department || '').trim().toLowerCase();
+        return resourceDept && userDepartment && resourceDept === userDepartment;
+    });
+    const sharedResources = filteredResources.filter((resource) => {
+        const resourceDept = (resource.department || '').trim();
+        return !resourceDept; // null / '' / undefined => موارد مشتركة
+    });
+
     const getCategoryIcon = (category) => {
         switch(category) {
             case 'IT': return FaLaptop;
@@ -354,9 +367,19 @@ const Resources = () => {
                     </div>
                 </div>
             ) : (
-                <Row>
-                    {filteredResources.length > 0 ? (
-                        filteredResources.map((resource) => {
+                <>
+                {/* Resources from user's own department */}
+                {departmentResources.length > 0 && (
+                    <>
+                        <Row className="mb-3">
+                            <Col>
+                                <h5 style={{ fontWeight: '600', color: '#34495e' }}>
+                                    Resources from your department
+                                </h5>
+                            </Col>
+                        </Row>
+                        <Row className="mb-4">
+                            {departmentResources.map((resource) => {
                             const CategoryIcon = getCategoryIcon(resource.category);
                             const imageUrl = resource.image || (resource.images && resource.images.length > 0 ? resource.images[0] : null);
                             
@@ -586,8 +609,260 @@ const Resources = () => {
                                     </Card>
                                 </Col>
                             );
-                        })
-                    ) : (
+                        })}
+                        </Row>
+                    </>
+                )}
+
+                {/* Shared resources for all departments */}
+                {sharedResources.length > 0 && (
+                    <>
+                        <Row className="mb-3">
+                            <Col>
+                                <h5 style={{ fontWeight: '600', color: '#34495e' }}>
+                                    Shared resources (all departments)
+                                </h5>
+                            </Col>
+                        </Row>
+                        <Row>
+                            {sharedResources.map((resource) => {
+                                const CategoryIcon = getCategoryIcon(resource.category);
+                                const imageUrl = resource.image || (resource.images && resource.images.length > 0 ? resource.images[0] : null);
+                                
+                                return (
+                                    <Col md={4} lg={3} key={resource._id} className="mb-4">
+                                        <Card 
+                                            className="h-100 border-0"
+                                            style={{
+                                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                overflow: 'hidden',
+                                                borderRadius: '20px',
+                                                background: '#fff',
+                                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                                border: '1px solid rgba(102, 126, 234, 0.1)'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.transform = 'translateY(-10px)';
+                                                e.currentTarget.style.boxShadow = '0 16px 40px rgba(102, 126, 234, 0.25)';
+                                                e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.3)';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.transform = 'translateY(0)';
+                                                e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)';
+                                                e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.1)';
+                                            }}
+                                        >
+                                            {/* Image Section */}
+                                            <div 
+                                                style={{
+                                                    height: '220px',
+                                                    background: imageUrl 
+                                                        ? `url(${imageUrl}) center/cover no-repeat`
+                                                        : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    position: 'relative',
+                                                    overflow: 'hidden'
+                                                }}
+                                            >
+                                                {!imageUrl && (
+                                                    <CategoryIcon 
+                                                        size={70} 
+                                                        style={{ 
+                                                            color: '#fff',
+                                                            opacity: 0.9,
+                                                            filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))'
+                                                        }} 
+                                                    />
+                                                )}
+                                                {imageUrl && (
+                                                    <div style={{
+                                                        position: 'absolute',
+                                                        top: '15px',
+                                                        right: '15px',
+                                                        background: 'linear-gradient(135deg, #4caf50 0%, #45a049 100%)',
+                                                        borderRadius: '25px',
+                                                        padding: '0.4rem 0.9rem',
+                                                        boxShadow: '0 4px 12px rgba(76, 175, 80, 0.4)'
+                                                    }}>
+                                                        <Badge style={{ 
+                                                            fontSize: '0.8rem',
+                                                            fontWeight: '600',
+                                                            background: 'transparent',
+                                                            color: '#fff',
+                                                            padding: 0
+                                                        }}>
+                                                            {resource.available_quantity} Available
+                                                        </Badge>
+                                                    </div>
+                                                )}
+                                                {/* Overlay gradient */}
+                                                <div style={{
+                                                    position: 'absolute',
+                                                    bottom: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    height: '60px',
+                                                    background: 'linear-gradient(to top, rgba(0,0,0,0.3), transparent)'
+                                                }} />
+                                            </div>
+                                            
+                                            <CardBody style={{ padding: '1rem' }}>
+                                                <CardTitle 
+                                                    tag="h6" 
+                                                    className="mb-2"
+                                                    style={{
+                                                        fontWeight: 'bold',
+                                                        color: '#333',
+                                                        fontSize: '1rem',
+                                                        lineHeight: '1.4',
+                                                        minHeight: '2.8rem',
+                                                        display: '-webkit-box',
+                                                        WebkitLineClamp: 2,
+                                                        WebkitBoxOrient: 'vertical',
+                                                        overflow: 'hidden'
+                                                    }}
+                                                >
+                                                    {resource.name}
+                                                </CardTitle>
+                                                
+                                                <CardText 
+                                                    className="text-muted small mb-2"
+                                                    style={{
+                                                        fontSize: '0.85rem',
+                                                        minHeight: '2.5rem',
+                                                        display: '-webkit-box',
+                                                        WebkitLineClamp: 2,
+                                                        WebkitBoxOrient: 'vertical',
+                                                        overflow: 'hidden'
+                                                    }}
+                                                >
+                                                    {resource.description || 'No description available'}
+                                                </CardText>
+                                                
+                                                <div className="mb-3" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                    <Badge 
+                                                        color="primary" 
+                                                        style={{ 
+                                                            fontSize: '0.75rem',
+                                                            padding: '0.35rem 0.65rem'
+                                                        }}
+                                                    >
+                                                        {resource.category}
+                                                    </Badge>
+                                                    {!imageUrl && (
+                                                        <Badge 
+                                                            color="success"
+                                                            style={{ 
+                                                                fontSize: '0.75rem',
+                                                                padding: '0.35rem 0.65rem'
+                                                            }}
+                                                        >
+                                                            Available: {resource.available_quantity}
+                                                        </Badge>
+                                                    )}
+                                                    {resource.location && (
+                                                        <Badge 
+                                                            color="info"
+                                                            style={{ 
+                                                                fontSize: '0.75rem',
+                                                                padding: '0.35rem 0.65rem'
+                                                            }}
+                                                        >
+                                                            📍 {resource.location}
+                                                        </Badge>
+                                                    )}
+                                                    {(resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) && (
+                                                        <Badge 
+                                                            color="warning"
+                                                            style={{ 
+                                                                fontSize: '0.75rem',
+                                                                padding: '0.35rem 0.65rem',
+                                                                background: '#fff3cd',
+                                                                color: '#856404',
+                                                                border: '1px solid #ffeeba'
+                                                            }}
+                                                        >
+                                                            💰 Deposit: {Math.min(resource.payment_amount || 0, 10).toFixed(2)} OMR
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                                
+                                                <div className="d-flex gap-2" style={{ marginTop: '0.5rem' }}>
+                                                    <Button 
+                                                        color="primary" 
+                                                        block 
+                                                        size="sm" 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleBorrowClick(resource);
+                                                        }}
+                                                        style={{
+                                                            fontWeight: '600',
+                                                            fontSize: '0.875rem',
+                                                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                            border: 'none',
+                                                            borderRadius: '10px',
+                                                            padding: '0.6rem',
+                                                            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+                                                            transition: 'all 0.3s ease'
+                                                        }}
+                                                        title="Borrow this resource now"
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.transform = 'translateY(-2px)';
+                                                            e.currentTarget.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.4)';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.transform = 'translateY(0)';
+                                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
+                                                        }}
+                                                    >
+                                                        <FaBox className="me-1" />Borrow
+                                                    </Button>
+                                                    <Button 
+                                                        color="info" 
+                                                        block 
+                                                        size="sm"
+                                                        title="⏳ Reserve - Requires Admin Approval: Reserve for future pickup, borrow period starts when picked up" 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleReserveClick(resource);
+                                                        }}
+                                                        style={{
+                                                            fontWeight: '600',
+                                                            fontSize: '0.875rem',
+                                                            background: 'linear-gradient(135deg, #17a2b8 0%, #138496 100%)',
+                                                            border: 'none',
+                                                            borderRadius: '10px',
+                                                            padding: '0.6rem',
+                                                            boxShadow: '0 4px 12px rgba(23, 162, 184, 0.3)',
+                                                            transition: 'all 0.3s ease'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.transform = 'translateY(-2px)';
+                                                            e.currentTarget.style.boxShadow = '0 6px 16px rgba(23, 162, 184, 0.4)';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.transform = 'translateY(0)';
+                                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(23, 162, 184, 0.3)';
+                                                        }}
+                                                    >
+                                                        <FaCalendarCheck className="me-1" />Reserve
+                                                    </Button>
+                                                </div>
+                                            </CardBody>
+                                        </Card>
+                                    </Col>
+                                );
+                            })}
+                        </Row>
+                    </>
+                )}
+
+                {/* If nothing at all after filters */}
+                {filteredResources.length === 0 && (
+                    <Row>
                         <Col>
                             <Card className="border-0 shadow-lg" style={{ borderRadius: '20px' }}>
                                 <CardBody className="text-center py-5">
@@ -610,8 +885,9 @@ const Resources = () => {
                                 </CardBody>
                             </Card>
                         </Col>
-                    )}
-                </Row>
+                    </Row>
+                )}
+                </>
             )}
 
             {/* Borrow Modal */}

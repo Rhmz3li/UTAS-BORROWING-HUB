@@ -6,7 +6,7 @@ import { fetchBorrowings } from "../redux/reducers/borrowingReducer";
 import { fetchReservations } from "../redux/reducers/reservationReducer";
 import { fetchNotifications } from "../redux/reducers/notificationReducer";
 import { fetchDevices } from "../redux/reducers/deviceReducer";
-import { FaBook, FaCalendarCheck, FaBell, FaBox, FaSearch, FaClock, FaCheckCircle, FaExclamationTriangle, FaArrowRight, FaQrcode, FaLaptop, FaMicroscope, FaTools, FaChartLine, FaPalette, FaRobot, FaTimes, FaArrowUp, FaLightbulb, FaUniversity, FaGraduationCap, FaBolt, FaStar, FaComments, FaPlus, FaBullhorn } from 'react-icons/fa';
+import { FaBook, FaCalendarCheck, FaBell, FaBox, FaSearch, FaClock, FaCheckCircle, FaExclamationTriangle, FaArrowRight, FaQrcode, FaLaptop, FaMicroscope, FaTools, FaChartLine, FaPalette, FaRobot, FaTimes, FaArrowUp, FaLightbulb, FaUniversity, FaGraduationCap, FaBolt, FaStar, FaPlus, FaBullhorn } from 'react-icons/fa';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { useTheme } from '../contexts/ThemeContext.jsx';
@@ -23,7 +23,6 @@ const Home = () => {
     
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('all');
-    const [chatbotOpen, setChatbotOpen] = useState(false);
     const [showWelcome, setShowWelcome] = useState(false);
     const [feedbackModal, setFeedbackModal] = useState(false);
     const [feedbackData, setFeedbackData] = useState({
@@ -1116,24 +1115,6 @@ const Home = () => {
                 <FaPlus /> Add Your Review
             </Button>
 
-            {/* AI Chatbot Floating Button */}
-            <Button
-                color="primary"
-                className="rounded-circle"
-                style={{
-                    position: 'fixed',
-                    bottom: '30px',
-                    right: '30px',
-                    width: '60px',
-                    height: '60px',
-                    zIndex: 1000,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                }}
-                onClick={() => setChatbotOpen(true)}
-            >
-                <FaRobot size={24} />
-            </Button>
-
             {/* Feedback Modal */}
             <Modal isOpen={feedbackModal} toggle={() => setFeedbackModal(false)} size="lg">
                 <ModalHeader toggle={() => setFeedbackModal(false)}>
@@ -1205,30 +1186,6 @@ const Home = () => {
                 </ModalFooter>
             </Modal>
 
-            {/* Chatbot Modal */}
-            <Modal isOpen={chatbotOpen} toggle={() => setChatbotOpen(false)} size="md">
-                <ModalHeader toggle={() => setChatbotOpen(false)}>
-                    <FaRobot className="me-2" />AI Assistant
-                </ModalHeader>
-                <ModalBody>
-                    <div className="text-center mb-4">
-                        <FaRobot size={48} className="text-primary mb-3" />
-                        <h5>Hello! 👋</h5>
-                        <p className="text-muted">
-                            I'm your smart assistant at UTAS Borrow Hub. How can I help you with borrowing your devices today?
-                        </p>
-                    </div>
-                    <div className="border rounded p-3 mb-3" style={{ minHeight: '200px', background: '#f8f9fa' }}>
-                        <p className="text-muted text-center mb-0">Chat interface will be implemented here</p>
-                    </div>
-                    <InputGroup>
-                        <Input placeholder="Type your question..." />
-                        <Button color="primary">
-                            <FaComments />
-                        </Button>
-                    </InputGroup>
-                </ModalBody>
-            </Modal>
             </Container>
         </div>
     );

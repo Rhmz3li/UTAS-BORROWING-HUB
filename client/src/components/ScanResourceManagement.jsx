@@ -3,7 +3,8 @@ import { Modal, ModalHeader, ModalBody, Button } from 'reactstrap';
 import { FaQrcode, FaSearch, FaSyncAlt } from 'react-icons/fa';
 
 /**
- * نقطة واحدة لمسح الموارد: اختيار بين "مسح للبحث" و "مسح وتحديث الحالة" (للأدمن فقط).
+ * Single entry point for scanning resources:
+ * choose between "Scan for Search" and "Scan & Update Status" (admin only for status updates).
  */
 const ScanResourceManagement = ({ isOpen, toggle, onScanResource, onScanUpdateStatus, isAdmin }) => {
   const handleScanResource = () => {

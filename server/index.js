@@ -145,6 +145,36 @@ app.post("/register", async (req, res) => {
             const token = jwt.sign({ id: newuser._id }, 'your-secret-key-change-in-production', {
                 expiresIn: '30d'
             });
+            // Try to send welcome email if email transport is configured
+            if (transporter) {
+                try {
+                    const appName = 'UTAS Borrowing Hub';
+                    const mailOptions = {
+                        from: process.env.EMAIL_USER,
+                        to: newuser.email,
+                        subject: `Welcome to ${appName}`,
+                        html: `
+                            <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+                                <h2 style="color: #333;">Welcome to ${appName}</h2>
+                                <p>Dear ${newuser.full_name || 'User'},</p>
+                                <p>Your account has been created successfully. You can now log in and start borrowing and reserving resources.</p>
+                                <ul>
+                                    <li><strong>Email:</strong> ${newuser.email}</li>
+                                    <li><strong>Role:</strong> ${newuser.role}</li>
+                                </ul>
+                                <p style="margin-top: 16px;">Thank you,<br/>${appName} Team</p>
+                            </div>
+                        `
+                    };
+                    await transporter.sendMail(mailOptions);
+                    console.log('Welcome email sent to:', newuser.email);
+                } catch (emailError) {
+                    console.error('Failed to send welcome email after registration:', emailError);
+                    // لا نفشل الطلب إذا فشل الإيميل
+                }
+            } else {
+                console.warn('Email transporter not configured; skipping welcome email.');
+            }
             res.status(200).json({ message: "User Registered..", token: token, user: newuser });
         }
     }
@@ -187,7 +217,7 @@ app.post("/login", async (req, res) => {
     }
 });
 
-// Configure nodemailer (using Gmail as example - you should use environment variables)
+// Configure nodemailer (supports Gmail, Outlook/Hotmail, etc. via EMAIL_SERVICE)
 let transporter;
 console.log('=== Email Configuration Check ===');
 console.log('EMAIL_USER:', process.env.EMAIL_USER || 'NOT SET');
@@ -209,9 +239,13 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
                 (emailPass.startsWith("'") && emailPass.endsWith("'"))) {
                 emailPass = emailPass.slice(1, -1).trim();
             }
-            
+
+            // Allow overriding service via EMAIL_SERVICE (e.g. 'gmail', 'outlook', 'hotmail')
+            const emailService = (process.env.EMAIL_SERVICE || 'gmail').toLowerCase();
+            console.log('Email service:', emailService);
+
             transporter = nodemailer.createTransport({
-                service: 'gmail',
+                service: emailService,
                 auth: {
                     user: emailUser,
                     pass: emailPass
@@ -231,6 +265,8 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
 
 // Forgot Password - Send reset link
 app.post("/forgot-password", async (req, res) => {
+    // user reference used in catch block as well
+    let user;
     try {
         const { email } = req.body;
 
@@ -268,7 +304,7 @@ app.post("/forgot-password", async (req, res) => {
         }
 
         // Find user by email only
-        const user = await UserModel.findOne({ email: sanitizedEmail });
+        user = await UserModel.findOne({ email: sanitizedEmail });
         
         // Log the request attempt
         logPasswordResetEvent('RESET_REQUEST', { 
@@ -1483,15 +1519,17 @@ app.post("/borrow/checkout", async (req, res) => {
             });
         }
 
-        // Notify user that request is pending approval
-        await NotificationModel.create({
-            user_id: user._id,
-            title: 'Borrow Request Submitted',
-            message: `Your borrow request for ${resource.name} has been submitted and is pending admin approval. You will be notified once it's approved. ${resource.requires_payment && resource.payment_amount > 0 ? `Payment of ${resource.payment_amount} OMR via ${payment_method} will be processed upon approval.` : ''}`,
-            type: 'Info',
-            related_type: 'Borrow',
-            related_id: newBorrow._id
-        });
+        // Notify user that request is pending approval (respect notification preferences)
+        if (await shouldSendInAppNotification(user._id, 'borrowApproval')) {
+            await NotificationModel.create({
+                user_id: user._id,
+                title: 'Borrow Request Submitted',
+                message: `Your borrow request for ${resource.name} has been submitted and is pending admin approval. You will be notified once it's approved. ${resource.requires_payment && resource.payment_amount > 0 ? `Payment of ${resource.payment_amount} OMR via ${payment_method} will be processed upon approval.` : ''}`,
+                type: 'Info',
+                related_type: 'Borrow',
+                related_id: newBorrow._id
+            });
+        }
 
         res.status(200).json({ success: true, data: newBorrow, message: "Success" });
     } catch (error) {
@@ -1608,14 +1646,17 @@ app.put("/borrow/:id/return", async (req, res) => {
         }).populate('user_id');
 
         for (const reservation of pendingReservations) {
-            await NotificationModel.create({
-                user_id: reservation.user_id._id,
-                title: 'Resource Available',
-                message: `The resource "${resource.name}" you reserved is now available for pickup!`,
-                type: 'Info',
-                related_type: 'Reservation',
-                related_id: reservation._id
-            });
+            const uid = reservation.user_id?._id || reservation.user_id;
+            if (uid && (await shouldSendInAppNotification(uid, 'reservationAvailable'))) {
+                await NotificationModel.create({
+                    user_id: uid,
+                    title: 'Resource Available',
+                    message: `The resource "${resource.name}" you reserved is now available for pickup!`,
+                    type: 'Info',
+                    related_type: 'Reservation',
+                    related_id: reservation._id
+                });
+            }
         }
 
         // Create penalty ONLY if:
@@ -1668,15 +1709,18 @@ app.put("/borrow/:id/return", async (req, res) => {
                 status: 'Pending'
             });
 
-            // Send notification about penalty
-            await NotificationModel.create({
-                user_id: borrow.user_id,
-                title: 'Penalty Applied',
-                message: `A penalty of ${fineAmount} OMR has been applied: ${description}. Please settle your penalty.`,
-                type: 'Warning',
-                related_type: 'Penalty',
-                related_id: penalty._id
-            });
+            // Send notification about penalty (respect notification preferences)
+            const borrowUserId = borrow.user_id?._id || borrow.user_id;
+            if (borrowUserId && (await shouldSendInAppNotification(borrowUserId, 'penalty'))) {
+                await NotificationModel.create({
+                    user_id: borrowUserId,
+                    title: 'Penalty Applied',
+                    message: `A penalty of ${fineAmount} OMR has been applied: ${description}. Please settle your penalty.`,
+                    type: 'Warning',
+                    related_type: 'Penalty',
+                    related_id: penalty._id
+                });
+            }
         }
 
         // Handle security deposit after return:
@@ -2124,15 +2168,18 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
         }
         await resource.save();
 
-        // Send notification to user
-        await NotificationModel.create({
-            user_id: reservation.user_id._id,
-            title: 'Reservation Confirmed',
-            message: `Your reservation for "${resource.name}" has been confirmed. Please pick it up on ${pickupDate.toLocaleDateString()} from ${resource.location || 'IT Borrowing Hub - Lab 2'}. The resource is now reserved for you.`,
-            type: 'Success',
-            related_type: 'Reservation',
-            related_id: reservation._id
-        });
+        // Send notification to user (respect notification preferences)
+        const resUserId = reservation.user_id?._id || reservation.user_id;
+        if (resUserId && (await shouldSendInAppNotification(resUserId, 'reservationConfirmation'))) {
+            await NotificationModel.create({
+                user_id: resUserId,
+                title: 'Reservation Confirmed',
+                message: `Your reservation for "${resource.name}" has been confirmed. Please pick it up on ${pickupDate.toLocaleDateString()} from ${resource.location || 'IT Borrowing Hub - Lab 2'}. The resource is now reserved for you.`,
+                type: 'Success',
+                related_type: 'Reservation',
+                related_id: reservation._id
+            });
+        }
 
         res.status(200).json({ 
             success: true, 
@@ -2259,18 +2306,21 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
         reservation.updated_at = new Date();
         await reservation.save();
 
-        // Send notification to user
-        await NotificationModel.create({
-            user_id: reservation.user_id._id,
-            title: 'Borrow Approved',
-            message: `Your reservation for "${resource.name}" has been approved and converted to a borrow. Due date: ${finalDueDate.toLocaleDateString()}.`,
-            type: 'Success',
-            related_type: 'Borrow',
-            related_id: newBorrow._id
-        });
+        // Send notification to user (respect notification preferences)
+        const resUserId2 = reservation.user_id?._id || reservation.user_id;
+        if (resUserId2 && (await shouldSendInAppNotification(resUserId2, 'borrowApproval'))) {
+            await NotificationModel.create({
+                user_id: resUserId2,
+                title: 'Borrow Approved',
+                message: `Your reservation for "${resource.name}" has been approved and converted to a borrow. Due date: ${finalDueDate.toLocaleDateString()}.`,
+                type: 'Success',
+                related_type: 'Borrow',
+                related_id: newBorrow._id
+            });
+        }
 
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             data: {
                 borrow: newBorrow,
                 reservation: reservation
@@ -2450,18 +2500,21 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
             { status: 'Completed', updated_at: Date.now() }
         );
 
-        // Notify user
-        await NotificationModel.create({
-            user_id: borrow.user_id._id,
-            title: 'Borrow Approved',
-            message: `Your borrow request for ${resource.name} has been approved. Please pick it up from: ${resource.location || 'IT Borrowing Hub - Lab 2'}. Due date: ${new Date(borrow.due_date).toLocaleDateString()}. ${borrow.requires_payment && borrow.payment_status === 'Pending' ? 'Payment has been processed.' : ''}`,
-            type: 'Success',
-            related_type: 'Borrow',
-            related_id: borrow._id
-        });
+        // Notify user (respect notification preferences)
+        const borrowUserIdApproved = borrow.user_id?._id || borrow.user_id;
+        if (borrowUserIdApproved && (await shouldSendInAppNotification(borrowUserIdApproved, 'borrowApproval'))) {
+            await NotificationModel.create({
+                user_id: borrowUserIdApproved,
+                title: 'Borrow Approved',
+                message: `Your borrow request for ${resource.name} has been approved. Please pick it up from: ${resource.location || 'IT Borrowing Hub - Lab 2'}. Due date: ${new Date(borrow.due_date).toLocaleDateString()}. ${borrow.requires_payment && borrow.payment_status === 'Pending' ? 'Payment has been processed.' : ''}`,
+                type: 'Success',
+                related_type: 'Borrow',
+                related_id: borrow._id
+            });
+        }
 
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             data: borrow,
             message: 'Borrow approved successfully' 
         });
@@ -2512,17 +2565,20 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
         // Delete the borrow request
         await BorrowModel.findByIdAndDelete(req.params.id);
 
-        // Notify user about rejection
-        await NotificationModel.create({
-            user_id: borrow.user_id._id,
-            title: 'Borrow Request Rejected',
-            message: `Your borrow request for ${borrow.resource_id.name} has been rejected. ${reason ? `Reason: ${reason}` : ''}`,
-            type: 'Error',
-            related_type: 'Borrow',
-            related_id: null
-        });
+        // Notify user about rejection (respect notification preferences)
+        const rejectUserId = borrow.user_id?._id || borrow.user_id;
+        if (rejectUserId && (await shouldSendInAppNotification(rejectUserId, 'borrowRejection'))) {
+            await NotificationModel.create({
+                user_id: rejectUserId,
+                title: 'Borrow Request Rejected',
+                message: `Your borrow request for ${borrow.resource_id.name} has been rejected. ${reason ? `Reason: ${reason}` : ''}`,
+                type: 'Error',
+                related_type: 'Borrow',
+                related_id: null
+            });
+        }
 
-        res.status(200).json({ 
+        res.status(200).json({
             success: true,
             message: 'Borrow request rejected successfully' 
         });
@@ -2814,14 +2870,17 @@ app.put("/penalties/:id/waive", async (req, res) => {
         penalty.waived_reason = waived_reason || 'Waived by administrator';
         await penalty.save();
 
-        await NotificationModel.create({
-            user_id: penalty.user_id,
-            title: 'Penalty Waived',
-            message: `Your penalty of ${penalty.fine_amount} OMR has been waived. Reason: ${penalty.waived_reason}`,
-            type: 'Success',
-            related_type: 'Penalty',
-            related_id: penalty._id
-        });
+        const penaltyUserId = penalty.user_id?._id || penalty.user_id;
+        if (penaltyUserId && (await shouldSendInAppNotification(penaltyUserId, 'penalty'))) {
+            await NotificationModel.create({
+                user_id: penaltyUserId,
+                title: 'Penalty Waived',
+                message: `Your penalty of ${penalty.fine_amount} OMR has been waived. Reason: ${penalty.waived_reason}`,
+                type: 'Success',
+                related_type: 'Penalty',
+                related_id: penalty._id
+            });
+        }
 
         res.send({ success: true, data: penalty });
     } catch (error) {
@@ -2861,15 +2920,17 @@ app.put("/admin/penalties/:id/status", async (req, res) => {
         if (status === 'Waived') {
             penalty.waived_by = user._id;
             penalty.waived_reason = waived_reason || 'Waived by administrator';
-            
-            await NotificationModel.create({
-                user_id: penalty.user_id,
-                title: 'Penalty Waived',
-                message: `Your penalty of ${penalty.fine_amount} OMR has been waived. Reason: ${penalty.waived_reason}`,
-                type: 'Success',
-                related_type: 'Penalty',
-                related_id: penalty._id
-            });
+            const pid = penalty.user_id?._id || penalty.user_id;
+            if (pid && (await shouldSendInAppNotification(pid, 'penalty'))) {
+                await NotificationModel.create({
+                    user_id: pid,
+                    title: 'Penalty Waived',
+                    message: `Your penalty of ${penalty.fine_amount} OMR has been waived. Reason: ${penalty.waived_reason}`,
+                    type: 'Success',
+                    related_type: 'Penalty',
+                    related_id: penalty._id
+                });
+            }
         } else if (status === 'Paid' && oldStatus === 'Pending') {
             penalty.paid_at = new Date();
         }
@@ -3368,6 +3429,46 @@ app.get("/admin/users", async (req, res) => {
     }
 });
 
+// Delete user (Admin only)
+app.delete("/admin/users/:id", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const currentUser = await UserModel.findById(decoded.id);
+
+        if (!currentUser || currentUser.role !== 'Admin') {
+            return res.status(403).json({ message: 'Only Admin can delete users' });
+        }
+
+        // Prevent deleting own account via API (frontend also guards this)
+        if (req.params.id === String(currentUser._id)) {
+            return res.status(400).json({ message: 'You cannot delete your own account' });
+        }
+
+        const userToDelete = await UserModel.findById(req.params.id);
+        if (!userToDelete) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        await UserModel.findByIdAndDelete(req.params.id);
+
+        res.status(200).json({
+            success: true,
+            message: 'User deleted successfully'
+        });
+    } catch (error) {
+        console.error('Delete user error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to delete user'
+        });
+    }
+});
+
 app.put("/admin/users/:id/status", async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -3523,6 +3624,64 @@ app.get("/admin/borrows/overdue", async (req, res) => {
     }
 });
 
+// ==================== OVERDUE BORROW SCHEDULER ====================
+
+/**
+ * Find all active borrows whose due date has passed and:
+ * - mark them as Overdue
+ * - send a due-date reminder notification to the user (respecting preferences)
+ */
+async function runOverdueBorrowCheck() {
+    try {
+        const now = new Date();
+
+        const borrows = await BorrowModel.find({
+            status: 'Active',
+            return_date: null,
+            due_date: { $lt: now }
+        }).select('_id user_id resource_id due_date status');
+
+        if (!borrows.length) {
+            return;
+        }
+
+        for (const b of borrows) {
+            // Update status to Overdue
+            b.status = 'Overdue';
+            b.updated_at = new Date();
+            await b.save();
+
+            // Load resource name for nicer message
+            const resource = await ResourceModel.findById(b.resource_id).select('name');
+            const title = 'Borrow overdue';
+            const message = `Your borrow for "${resource?.name || 'resource'}" is now overdue. Due date was ${b.due_date.toLocaleDateString()}. Please return it as soon as possible.`;
+
+            if (await shouldSendInAppNotification(b.user_id, 'dueDateReminder')) {
+                // Avoid sending duplicate overdue reminders for the same borrow
+                const existing = await NotificationModel.findOne({
+                    user_id: b.user_id,
+                    related_type: 'Borrow',
+                    related_id: b._id,
+                    type: 'Reminder'
+                }).select('_id');
+
+                if (!existing) {
+                    await NotificationModel.create({
+                        user_id: b.user_id,
+                        title,
+                        message,
+                        type: 'Reminder',
+                        related_type: 'Borrow',
+                        related_id: b._id
+                    });
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Overdue borrow check failed:', err);
+    }
+}
+
 // ==================== UPDATE PROFILE ====================
 
 app.put("/profile", async (req, res) => {
@@ -3544,6 +3703,75 @@ app.put("/profile", async (req, res) => {
         res.send({ success: true, user });
     } catch (error) {
         res.send(error);
+    }
+});
+
+// ==================== NOTIFICATION SETTINGS (Customizable Notifications) ====================
+const NOTIFICATION_PREFERENCE_KEYS = ['borrowApproval', 'borrowRejection', 'dueDateReminder', 'reservationConfirmation', 'reservationAvailable', 'penalty'];
+
+const getDefaultNotificationPreferences = () => ({
+    borrowApproval: { inApp: true, email: true },
+    borrowRejection: { inApp: true, email: true },
+    dueDateReminder: { inApp: true, email: true },
+    reservationConfirmation: { inApp: true, email: true },
+    reservationAvailable: { inApp: true, email: true },
+    penalty: { inApp: true, email: true }
+});
+
+async function shouldSendInAppNotification(userId, preferenceKey) {
+    const u = await UserModel.findById(userId).select('notificationPreferences');
+    const def = getDefaultNotificationPreferences();
+    const prefs = u?.notificationPreferences && typeof u.notificationPreferences === 'object'
+        ? { ...def, ...u.notificationPreferences } : def;
+    const p = prefs[preferenceKey];
+    return !p || p.inApp !== false;
+}
+
+app.get("/profile/notification-settings", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ message: 'Not authorized' });
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id).select('notificationPreferences');
+        if (!user) return res.status(404).json({ message: 'User not found' });
+        const prefs = user.notificationPreferences && typeof user.notificationPreferences === 'object'
+            ? { ...getDefaultNotificationPreferences(), ...user.notificationPreferences }
+            : getDefaultNotificationPreferences();
+        res.json({ success: true, data: prefs });
+    } catch (error) {
+        console.error('Get notification settings error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Failed to load notification settings' });
+    }
+});
+
+app.put("/profile/notification-settings", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ message: 'Not authorized' });
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const body = req.body || {};
+        const defaults = getDefaultNotificationPreferences();
+        const prefs = {};
+        for (const key of NOTIFICATION_PREFERENCE_KEYS) {
+            const b = body[key];
+            if (b && typeof b === 'object' && !Array.isArray(b)) {
+                prefs[key] = {
+                    inApp: b.inApp !== false,
+                    email: b.email !== false
+                };
+            } else {
+                prefs[key] = defaults[key] || { inApp: true, email: true };
+            }
+        }
+        const user = await UserModel.findById(decoded.id);
+        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+        user.notificationPreferences = prefs;
+        user.updated_at = new Date();
+        await user.save();
+        res.json({ success: true, data: prefs, message: 'Notification settings saved' });
+    } catch (error) {
+        console.error('Update notification settings error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Failed to save notification settings' });
     }
 });
 
@@ -3808,7 +4036,8 @@ app.get("/admin/reports/analytics", async (req, res) => {
             return res.status(403).json({ message: "Not authorized" });
         }
 
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, search, category, resourceStatus, department, userRole, borrowStatus, paymentStatus } = req.query;
+
         const dateFilter = {};
         if (startDate || endDate) {
             dateFilter.borrow_date = {};
@@ -3816,47 +4045,121 @@ app.get("/admin/reports/analytics", async (req, res) => {
             if (endDate) dateFilter.borrow_date.$lte = new Date(endDate);
         }
 
+        // Base borrow match: date + borrow status + payment status (on Borrow)
+        const borrowMatch = { ...dateFilter };
+        if (borrowStatus) borrowMatch.status = borrowStatus;
+        if (paymentStatus === 'Paid' || paymentStatus === 'Unpaid') {
+            borrowMatch.payment_status = paymentStatus === 'Paid' ? 'Paid' : 'Pending';
+        }
+
+        // When paymentStatus is Refunded or Completed, filter by borrow IDs from Payment collection
+        let paymentBorrowIds = null;
+        if (paymentStatus === 'Refunded' || paymentStatus === 'Completed') {
+            const paymentMatch = { status: paymentStatus, borrow_id: { $exists: true, $ne: null } };
+            if (startDate || endDate) {
+                paymentMatch.created_at = {};
+                if (startDate) paymentMatch.created_at.$gte = new Date(startDate);
+                if (endDate) paymentMatch.created_at.$lte = new Date(endDate);
+            }
+            const paid = await PaymentModel.find(paymentMatch).distinct('borrow_id');
+            paymentBorrowIds = paid.filter(Boolean);
+            borrowMatch._id = { $in: paymentBorrowIds.length ? paymentBorrowIds : [null] };
+        }
+
+        // Optional: filter by search, category, resourceStatus, department, userRole via lookup
+        let borrowIdFilter = null;
+        const hasLookupFilters = search || category || resourceStatus || department || userRole;
+        if (hasLookupFilters) {
+            const pipeline = [
+                { $match: borrowMatch },
+                {
+                    $lookup: {
+                        from: 'Resources',
+                        localField: 'resource_id',
+                        foreignField: '_id',
+                        as: 'resource'
+                    }
+                },
+                { $unwind: { path: '$resource', preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: 'Users',
+                        localField: 'user_id',
+                        foreignField: '_id',
+                        as: 'user'
+                    }
+                },
+                { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+                { $match: {} }
+            ];
+            const andConditions = [];
+            if (search && search.trim()) {
+                const term = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(term, 'i');
+                andConditions.push({
+                    $or: [
+                        { 'resource.name': regex },
+                        { 'resource.barcode': regex },
+                        { 'resource.qr_code': regex },
+                        { 'user.full_name': regex }
+                    ]
+                });
+            }
+            if (category) andConditions.push({ 'resource.category': category });
+            if (resourceStatus) andConditions.push({ 'resource.status': resourceStatus });
+            if (department) andConditions.push({ 'user.department': department });
+            if (userRole) andConditions.push({ 'user.role': userRole });
+            if (andConditions.length) pipeline[pipeline.length - 1].$match.$and = andConditions;
+
+            const filtered = await BorrowModel.aggregate([...pipeline, { $project: { _id: 1 } }]);
+            const ids = filtered.map(b => b._id);
+            borrowIdFilter = ids.length ? { _id: { $in: ids } } : { _id: { $in: [] } };
+        }
+
+        const baseFilter = hasLookupFilters ? { ...borrowMatch, ...borrowIdFilter } : borrowMatch;
+
         // Total Borrows
-        const totalBorrows = await BorrowModel.countDocuments(dateFilter);
+        const totalBorrows = await BorrowModel.countDocuments(baseFilter);
 
         // Total Returns
-        const totalReturns = await BorrowModel.countDocuments({
+        const returnsFilter = {
+            ...baseFilter,
             status: 'Returned',
-            return_date: { $exists: true },
-            ...(startDate || endDate ? {
-                return_date: {
-                    ...(startDate ? { $gte: new Date(startDate) } : {}),
-                    ...(endDate ? { $lte: new Date(endDate) } : {})
-                }
-            } : {})
-        });
+            return_date: { $exists: true }
+        };
+        if (startDate || endDate) {
+            returnsFilter.return_date = {};
+            if (startDate) returnsFilter.return_date.$gte = new Date(startDate);
+            if (endDate) returnsFilter.return_date.$lte = new Date(endDate);
+        }
+        const totalReturns = await BorrowModel.countDocuments(returnsFilter);
 
-        // Overdue Items
-        const overdueItems = await BorrowModel.countDocuments({
-            status: 'Overdue'
-        });
+        // Overdue Items (apply same filters as other metrics)
+        const overdueFilter = { ...baseFilter, status: 'Overdue' };
+        const overdueItems = await BorrowModel.countDocuments(overdueFilter);
 
-        // Total Revenue
+        // Total Revenue (Payment-based; respect date and paymentStatus if Refunded/Completed)
+        const revenueMatch = { status: 'Completed' };
+        if (startDate || endDate) {
+            revenueMatch.created_at = {};
+            if (startDate) revenueMatch.created_at.$gte = new Date(startDate);
+            if (endDate) revenueMatch.created_at.$lte = new Date(endDate);
+        }
         const revenueData = await PaymentModel.aggregate([
-            { $match: { status: 'Completed', ...(startDate || endDate ? {
-                created_at: {
-                    ...(startDate ? { $gte: new Date(startDate) } : {}),
-                    ...(endDate ? { $lte: new Date(endDate) } : {})
-                }
-            } : {}) } },
+            { $match: revenueMatch },
             { $group: { _id: null, total: { $sum: '$amount' } } }
         ]);
         const totalRevenue = revenueData.length > 0 ? revenueData[0].total : 0;
 
-        // Most Borrowed Resources
+        // Most Borrowed Resources (use baseFilter)
         const mostBorrowed = await BorrowModel.aggregate([
-            { $match: dateFilter },
+            { $match: baseFilter },
             { $group: { _id: '$resource_id', count: { $sum: 1 } } },
             { $sort: { count: -1 } },
             { $limit: 10 },
             {
                 $lookup: {
-                    from: 'resources',
+                    from: 'Resources',
                     localField: '_id',
                     foreignField: '_id',
                     as: 'resource'
@@ -3872,10 +4175,12 @@ app.get("/admin/reports/analytics", async (req, res) => {
             }
         ]);
 
-        // Department Statistics
-        // First get all users grouped by department
+        // Department Statistics (filter users by department if department filter set)
+        const usersByDeptMatch = { department: { $exists: true, $ne: null, $ne: '' } };
+        if (department) usersByDeptMatch.department = department;
         const usersByDept = await UserModel.aggregate([
-            { $match: { department: { $exists: true, $ne: null, $ne: '' } } },
+            { $match: usersByDeptMatch },
+            ...(userRole ? [{ $match: { role: userRole } }] : []),
             { $group: { 
                 _id: '$department', 
                 userIds: { $push: '$_id' },
@@ -3883,14 +4188,14 @@ app.get("/admin/reports/analytics", async (req, res) => {
             } }
         ]);
 
-        // Then get borrow counts for each department
         const departmentStats = await Promise.all(
             usersByDept.map(async (dept) => {
-                const borrowQuery = {
-                    user_id: { $in: dept.userIds }
-                };
-                if (dateFilter.borrow_date) {
-                    borrowQuery.borrow_date = dateFilter.borrow_date;
+                const borrowQuery = { user_id: { $in: dept.userIds } };
+                if (Object.keys(dateFilter).length) borrowQuery.borrow_date = dateFilter.borrow_date;
+                if (borrowStatus) borrowQuery.status = borrowStatus;
+                if (hasLookupFilters) Object.assign(borrowQuery, borrowIdFilter);
+                if (paymentBorrowIds && (paymentStatus === 'Refunded' || paymentStatus === 'Completed')) {
+                    borrowQuery._id = { $in: paymentBorrowIds.length ? paymentBorrowIds : [null] };
                 }
                 const borrowCount = await BorrowModel.countDocuments(borrowQuery);
                 return {
@@ -3900,11 +4205,16 @@ app.get("/admin/reports/analytics", async (req, res) => {
                 };
             })
         );
-        
-        // Sort by users descending
         departmentStats.sort((a, b) => b.users - a.users);
 
-        // User Trends (Last 6 months)
+        // Detailed borrow list for current filters (for UI table)
+        const borrowDetails = await BorrowModel.find(baseFilter)
+            .populate('user_id', 'full_name email department role')
+            .populate('resource_id', 'name category status barcode qr_code')
+            .sort({ borrow_date: -1 })
+            .limit(200);
+
+        // User Trends (Last 6 months) - no filter applied for simplicity
         const userTrends = [];
         for (let i = 5; i >= 0; i--) {
             const date = new Date();
@@ -3929,7 +4239,7 @@ app.get("/admin/reports/analytics", async (req, res) => {
                 newUsers,
                 activeUsers: activeUsers.length,
                 borrows,
-                trend: i === 5 ? 0 : Math.round(Math.random() * 20 - 10) // Placeholder for trend calculation
+                trend: i === 5 ? 0 : Math.round(Math.random() * 20 - 10)
             });
         }
 
@@ -3942,7 +4252,8 @@ app.get("/admin/reports/analytics", async (req, res) => {
                 totalRevenue,
                 mostBorrowed,
                 departmentStats,
-                userTrends
+                userTrends,
+                borrowDetails
             }
         });
     } catch (error) {
@@ -4207,19 +4518,69 @@ app.get("/admin/reports/export", async (req, res) => {
             return res.status(403).json({ message: "Not authorized" });
         }
 
-        const { format, startDate, endDate } = req.query;
+        const { format, startDate, endDate, search, category, resourceStatus, department, userRole, borrowStatus, paymentStatus } = req.query;
 
-        // For now, return JSON. In production, use libraries like pdfkit, exceljs, or csv-writer
         const dateFilter = {};
         if (startDate || endDate) {
-            dateFilter.created_at = {};
-            if (startDate) dateFilter.created_at.$gte = new Date(startDate);
-            if (endDate) dateFilter.created_at.$lte = new Date(endDate);
+            dateFilter.borrow_date = {};
+            if (startDate) dateFilter.borrow_date.$gte = new Date(startDate);
+            if (endDate) dateFilter.borrow_date.$lte = new Date(endDate);
         }
 
-        const borrows = await BorrowModel.find(dateFilter)
-            .populate('user_id', 'full_name email')
-            .populate('resource_id', 'name category')
+        const borrowMatch = { ...dateFilter };
+        if (borrowStatus) borrowMatch.status = borrowStatus;
+        if (paymentStatus === 'Paid' || paymentStatus === 'Unpaid') {
+            borrowMatch.payment_status = paymentStatus === 'Paid' ? 'Paid' : 'Pending';
+        }
+        let paymentBorrowIds = null;
+        if (paymentStatus === 'Refunded' || paymentStatus === 'Completed') {
+            const paymentMatch = { status: paymentStatus, borrow_id: { $exists: true, $ne: null } };
+            if (startDate || endDate) {
+                paymentMatch.created_at = {};
+                if (startDate) paymentMatch.created_at.$gte = new Date(startDate);
+                if (endDate) paymentMatch.created_at.$lte = new Date(endDate);
+            }
+            paymentBorrowIds = await PaymentModel.find(paymentMatch).distinct('borrow_id');
+            borrowMatch._id = { $in: (paymentBorrowIds || []).length ? paymentBorrowIds : [null] };
+        }
+
+        const hasLookupFilters = search || category || resourceStatus || department || userRole;
+        let baseFilter = borrowMatch;
+        if (hasLookupFilters) {
+            const pipeline = [
+                { $match: borrowMatch },
+                { $lookup: { from: 'Resources', localField: 'resource_id', foreignField: '_id', as: 'resource' } },
+                { $unwind: { path: '$resource', preserveNullAndEmptyArrays: true } },
+                { $lookup: { from: 'Users', localField: 'user_id', foreignField: '_id', as: 'user' } },
+                { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+                { $match: {} }
+            ];
+            const andConditions = [];
+            if (search && search.trim()) {
+                const term = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(term, 'i');
+                andConditions.push({
+                    $or: [
+                        { 'resource.name': regex },
+                        { 'resource.barcode': regex },
+                        { 'resource.qr_code': regex },
+                        { 'user.full_name': regex }
+                    ]
+                });
+            }
+            if (category) andConditions.push({ 'resource.category': category });
+            if (resourceStatus) andConditions.push({ 'resource.status': resourceStatus });
+            if (department) andConditions.push({ 'user.department': department });
+            if (userRole) andConditions.push({ 'user.role': userRole });
+            if (andConditions.length) pipeline[pipeline.length - 1].$match.$and = andConditions;
+            const filtered = await BorrowModel.aggregate([...pipeline, { $project: { _id: 1 } }]);
+            const ids = filtered.map(b => b._id);
+            baseFilter = ids.length ? { ...borrowMatch, _id: { $in: ids } } : { _id: { $in: [] } };
+        }
+
+        const borrows = await BorrowModel.find(baseFilter)
+            .populate('user_id', 'full_name email department role')
+            .populate('resource_id', 'name category status barcode qr_code')
             .sort({ borrow_date: -1 });
 
         const reportData = {
@@ -4270,6 +4631,15 @@ const PORT = process.env.PORT || 5000;
 
 const server = app.listen(PORT, () => {
     console.log(`Server started at ${PORT}..`);
+    // Run overdue check once on startup, then every hour
+    runOverdueBorrowCheck().catch((err) => {
+        console.error('Initial overdue borrow check failed:', err);
+    });
+    setInterval(() => {
+        runOverdueBorrowCheck().catch((err) => {
+            console.error('Scheduled overdue borrow check failed:', err);
+        });
+    }, 60 * 60 * 1000);
 }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
         console.error(`\n❌ Error: Port ${PORT} is already in use.`);
