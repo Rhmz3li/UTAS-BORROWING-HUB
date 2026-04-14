@@ -1,0 +1,34 @@
+{
+  "name": "utas-borrowing-hub-server",
+  "version": "1.0.0",
+  "description": "UTAS Borrowing Hub Backend API",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "utas",
+    "borrowing",
+    "hub",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "ignore-punycode-warning": "^1.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^7.8.9",
+    "nodemailer": "^7.0.10",
+    "openai": "^6.33.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
