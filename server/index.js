@@ -1362,6 +1362,70 @@ app.put("/resources/:id", async (req, res) => {
     }
 });
 
+// Delete resource (Admin/Assistant only)
+app.delete("/resources/:id", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+
+        if (!user || !['Admin', 'Assistant'].includes(user.role)) {
+            return res.status(403).json({ success: false, message: 'Not authorized. Admin or Assistant role required.' });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: 'Invalid resource ID' });
+        }
+
+        const resource = await ResourceModel.findById(req.params.id);
+        if (!resource) {
+            return res.status(404).json({ success: false, message: 'Resource not found' });
+        }
+
+        // Prevent deleting resources that are currently in use.
+        const activeBorrow = await BorrowModel.findOne({
+            resource_id: resource._id,
+            status: { $in: ['Active', 'Overdue', 'PendingApproval'] }
+        }).select('_id status');
+
+        if (activeBorrow) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot delete resource. It has an active borrow record (${activeBorrow.status}).`
+            });
+        }
+
+        const activeReservation = await ReservationModel.findOne({
+            resource_id: resource._id,
+            status: { $in: ['Pending', 'Confirmed'] }
+        }).select('_id status');
+
+        if (activeReservation) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot delete resource. It has an active reservation (${activeReservation.status}).`
+            });
+        }
+
+        await ResourceModel.findByIdAndDelete(resource._id);
+
+        res.status(200).json({
+            success: true,
+            message: 'Resource deleted successfully'
+        });
+    } catch (error) {
+        console.error('Delete resource error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to delete resource'
+        });
+    }
+});
+
 // Legacy endpoint - keep for backward compatibility
 app.post("/saveDevice", async (req, res) => {
     try {
