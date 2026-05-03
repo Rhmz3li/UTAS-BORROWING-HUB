@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, ListGroup, ListGroupItem, Badge, Button } from "reactstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { fetchNotifications } from "../redux/reducers/notificationReducer";
+import { fetchNotifications, updateNotification } from "../redux/reducers/notificationReducer";
 import { FaBell, FaArrowLeft, FaInfoCircle, FaCheckCircle, FaExclamationTriangle } from 'react-icons/fa';
 
 const Notifications = () => {
@@ -36,6 +36,36 @@ const Notifications = () => {
         }
     };
 
+    const getNotificationRoute = (notification) => {
+        switch (notification?.related_type) {
+            case 'Payment':
+                return '/payments';
+            case 'Penalty':
+                return '/penalties';
+            case 'Borrow':
+                return '/my-borrows';
+            case 'Reservation':
+                return '/reservations';
+            default:
+                return null;
+        }
+    };
+
+    const handleNotificationClick = async (notification) => {
+        try {
+            if (!notification?.is_read) {
+                await dispatch(updateNotification({ id: notification._id, notificationData: {} }));
+            }
+        } catch (error) {
+            // Ignore mark-as-read errors to avoid blocking navigation.
+        }
+
+        const route = getNotificationRoute(notification);
+        if (route) {
+            navigate(route);
+        }
+    };
+
     return (
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
             <Container fluid className="py-4">
@@ -65,7 +95,12 @@ const Notifications = () => {
                                     const NotificationIcon = getNotificationIcon(notification.type);
                                     const color = getNotificationColor(notification.type);
                                     return (
-                                        <ListGroupItem key={notification._id} className="d-flex align-items-start">
+                                        <ListGroupItem
+                                            key={notification._id}
+                                            className="d-flex align-items-start"
+                                            onClick={() => handleNotificationClick(notification)}
+                                            style={{ cursor: 'pointer' }}
+                                        >
                                             <NotificationIcon className={`me-3 mt-1 text-${color}`} size={20} />
                                             <div className="flex-grow-1">
                                                 <div className="d-flex justify-content-between align-items-start mb-1">

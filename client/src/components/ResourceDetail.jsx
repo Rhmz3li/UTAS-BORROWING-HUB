@@ -153,17 +153,18 @@ const ResourceDetail = () => {
       })).unwrap();
       
       const location = resource.location || 'IT Borrowing Hub - Lab 2';
-      toast.success(
-        `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
-        { autoClose: 6000 }
-      );
+      const needsDeposit = resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0);
 
-      // After browsing/borrowing, show a popup explaining how to pay the deposit (if required)
-      if (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) {
-        const depositAmount = Math.min(resource.payment_amount || 0, 10).toFixed(2);
-        // Guide the user directly to the Payments page to complete the deposit
-        navigate('/payments');
+      if (needsDeposit && paymentMethod === 'Card' && result?.data?.payment_id) {
+        toast.info('Borrow request created. Complete the online card payment to send it to admin for approval.');
+        navigate('/payments', { state: { openPaymentId: result.data.payment_id } });
+      } else {
+        toast.success(
+          `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
+          { autoClose: 6000 }
+        );
       }
+
       setBorrowModal(false);
       setSelectedBorrowDate('');
       setTermsAccepted(false);
@@ -189,8 +190,10 @@ const ResourceDetail = () => {
       return;
     }
 
+    const needsDeposit = resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0);
+
     // Check if payment is required
-    if (resource.requires_payment && resource.payment_amount > 0) {
+    if (needsDeposit) {
       if (!paymentMethod) {
         toast.error('Please select a payment method');
         return;
@@ -202,20 +205,30 @@ const ResourceDetail = () => {
       const expiryDate = new Date(pickupDate);
       expiryDate.setDate(expiryDate.getDate() + 7); // Default 7 days expiry
 
-      await dispatch(addReservation({
+      const result = await dispatch(addReservation({
         resource_id: resource._id,
         pickup_date: pickupDate.toISOString(),
-        expiry_date: expiryDate.toISOString()
+        expiry_date: expiryDate.toISOString(),
+        terms_accepted: true,
+        payment_method: needsDeposit ? paymentMethod : null,
+        payment_amount: needsDeposit ? Math.min(resource.payment_amount || 0, 10) : 0
       })).unwrap();
-      
-      toast.success('Reservation created successfully! You will be notified when the resource is available.' + (resource.requires_payment ? ' Payment will be processed by admin.' : ''));
+
+      if (needsDeposit && paymentMethod === 'Card' && result?.data?.payment_id) {
+        toast.info('Reservation request created. Complete the online card payment to send it to admin for approval.');
+        navigate('/payments', { state: { openPaymentId: result.data.payment_id } });
+      } else {
+        toast.success('Reservation request submitted successfully! Pending admin approval.');
+      }
       setReserveModal(false);
       setSelectedReserveDate('');
       setTermsAccepted(false);
       setPaymentMethod('');
       fetchResource();
       fetchAvailability();
-      navigate('/reservations');
+      if (!(needsDeposit && paymentMethod === 'Card' && result?.data?.payment_id)) {
+        navigate('/reservations');
+      }
     } catch (error) {
       // Handle error from rejectWithValue (payload) or regular error (message)
       let errorMessage = 'Failed to create reservation';
@@ -1437,8 +1450,6 @@ const ResourceDetail = () => {
                     <option value="">Choose payment method...</option>
                     <option value="Cash">Cash</option>
                     <option value="Card">Card</option>
-                    <option value="Online">Online</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
                   </Input>
                 </FormGroup>
                 <div style={{ fontSize: '0.85rem', color: '#1565c0', marginTop: '0.75rem', fontStyle: 'italic' }}>
@@ -1703,8 +1714,6 @@ const ResourceDetail = () => {
                     <option value="">Choose payment method...</option>
                     <option value="Cash">Cash</option>
                     <option value="Card">Card</option>
-                    <option value="Online">Online</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
                   </Input>
                 </FormGroup>
                 <div style={{ fontSize: '0.85rem', color: '#1565c0', marginTop: '0.75rem', fontStyle: 'italic' }}>

@@ -211,6 +211,11 @@ const MyReservations = () => {
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         {getStatusBadge(reservation.status, reservation.expiry_date)}
+                                                        {reservation.requires_payment && (reservation.payment_amount || 0) > 0 && (
+                                                            <div style={{ fontSize: '0.8rem', color: reservation.payment_status === 'Paid' ? '#2e7d32' : '#ff9800', marginTop: '0.35rem' }}>
+                                                                Deposit: {reservation.payment_status === 'Paid' ? 'Paid' : 'Pending'}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         {['Pending', 'Confirmed'].includes(reservation.status) && (
@@ -231,6 +236,12 @@ const MyReservations = () => {
                                                             <Alert color="info" className="mt-2 mb-0" style={{ fontSize: '0.85rem', padding: '0.5rem' }}>
                                                                 <FaInfoCircle className="me-1" />
                                                                 Waiting for admin approval to convert to borrow
+                                                            </Alert>
+                                                        )}
+                                                        {reservation.status === 'Pending' && reservation.requires_payment && (reservation.payment_amount || 0) > 0 && reservation.payment_status !== 'Paid' && (
+                                                            <Alert color="warning" className="mt-2 mb-0" style={{ fontSize: '0.85rem', padding: '0.5rem' }}>
+                                                                <FaInfoCircle className="me-1" />
+                                                                Complete your payment from the Payments page so the admin can review this reservation.
                                                             </Alert>
                                                         )}
                                                     </td>

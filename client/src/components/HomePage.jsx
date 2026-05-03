@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Container, Row, Col, Card, CardBody, CardTitle, Button, Badge, Input, InputGroup, InputGroupText, Alert, Nav, NavItem, NavLink, TabContent, TabPane, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label } from "reactstrap";
+import { Container, Row, Col, Card, CardBody, CardTitle, Button, Badge, Input, InputGroup, InputGroupText, Alert, Nav, NavItem, NavLink, TabContent, TabPane, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Spinner } from "reactstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { fetchBorrowings } from "../redux/reducers/borrowingReducer";
@@ -34,6 +34,14 @@ const Home = () => {
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
     const [announcements, setAnnouncements] = useState([]);
     const [loadingAnnouncements, setLoadingAnnouncements] = useState(false);
+    const [chatMessage, setChatMessage] = useState('');
+    const [chatLoading, setChatLoading] = useState(false);
+    const [chatMessages, setChatMessages] = useState([
+        {
+            type: 'bot',
+            text: 'Hello! I am Abi. I can help only with using the UTAS Borrowing Hub system, such as resources, borrowing, reservations, payments, returns, notifications, and profile actions.'
+        }
+    ]);
 
     const fetchAnnouncements = useCallback(async () => {
         try {
@@ -160,6 +168,70 @@ const Home = () => {
         }
     };
 
+    const abiQuickQuestions = [
+        'How do I borrow a device?',
+        'How do I reserve a device?',
+        'How do card payments work?',
+        'How can I return an item?',
+        'Where do I see notifications?'
+    ];
+
+    const abiQuickReplies = {
+        'How do I borrow a device?': 'Open Resources, choose an available device, click Borrow, select the due date, then submit the request. If the device requires a deposit and you choose Card, complete the payment from Payments first, then wait for admin approval.',
+        'How do I reserve a device?': 'Open Resources, choose the device, click Reserve, select the pickup date and expiry date, then submit the reservation. If Card payment is required, complete the deposit in Payments before admin review.',
+        'How do card payments work?': 'When you choose Card, the system creates a payment record and opens the payment flow for you. After successful payment, the deposit becomes Paid and the admin is notified that your request is ready for review.',
+        'How can I return an item?': 'Go to My Borrows, find the active borrow, and request the return. After that, hub staff must confirm the physical return before the process is completed in the system.',
+        'Where do I see notifications?': 'Open Notifications from the user dashboard. You will find updates about approvals, rejections, payment completion, returns, refunds, and other system events there.'
+    };
+
+    const abiSystemOnlyMessage = 'I can only help with the UTAS Borrowing Hub system. Please ask me about resources, borrowing, reservations, payments, returns, notifications, or your profile.';
+
+    const handleSendChatMessage = async (presetMessage) => {
+        const outgoingMessage = String(presetMessage || chatMessage).trim();
+        if (!outgoingMessage || chatLoading) {
+            return;
+        }
+
+        const userMessage = { type: 'user', text: outgoingMessage };
+        setChatMessage('');
+
+        if (presetMessage && abiQuickReplies[outgoingMessage]) {
+            setChatMessages((prev) => [
+                ...prev,
+                userMessage,
+                { type: 'bot', text: abiQuickReplies[outgoingMessage] }
+            ]);
+            return;
+        }
+
+        setChatMessages((prev) => [...prev, userMessage]);
+
+        setChatLoading(true);
+
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.post(
+                'http://localhost:5000/assistant/abi-chat',
+                { message: outgoingMessage },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            const reply = response.data?.data?.reply || 'Abi could not generate a response right now.';
+            setChatMessages((prev) => [...prev, { type: 'bot', text: reply }]);
+        } catch (error) {
+            console.error('Abi chat error:', error);
+            setChatMessages((prev) => [
+                ...prev,
+                {
+                    type: 'bot',
+                    text: abiSystemOnlyMessage
+                }
+            ]);
+        } finally {
+            setChatLoading(false);
+        }
+    };
+
     const colleges = [
         { id: 'all', name: 'All Colleges', icon: FaUniversity },
         { id: 'it', name: 'Information Technology', icon: FaLaptop },
@@ -223,8 +295,8 @@ const Home = () => {
                         <Col md={4} className="text-center mb-3">
                             <div className="p-3 bg-info bg-opacity-10 rounded">
                                 <FaRobot size={30} className="text-info mb-2" />
-                                <h6>AI Assistant</h6>
-                                <p className="small text-muted">Get instant help with our smart chatbot</p>
+                                <h6>AI Chatbot Assistance</h6>
+                                <p className="small text-muted">Ask Abi for help with using this system only</p>
                             </div>
                         </Col>
                     </Row>
@@ -1208,22 +1280,79 @@ const Home = () => {
             {/* Chatbot Modal */}
             <Modal isOpen={chatbotOpen} toggle={() => setChatbotOpen(false)} size="md">
                 <ModalHeader toggle={() => setChatbotOpen(false)}>
-                    <FaRobot className="me-2" />AI Assistant
+                    <FaRobot className="me-2" />Abi - AI Chatbot Assistance
                 </ModalHeader>
                 <ModalBody>
                     <div className="text-center mb-4">
                         <FaRobot size={48} className="text-primary mb-3" />
                         <h5>Hello! 👋</h5>
                         <p className="text-muted">
-                            I'm your smart assistant at UTAS Borrow Hub. How can I help you with borrowing your devices today?
+                            I am Abi. I can help only with the UTAS Borrowing Hub system, including FAQ support for resources, borrowing, reservations, payments, returns, notifications, and profile actions.
                         </p>
                     </div>
-                    <div className="border rounded p-3 mb-3" style={{ minHeight: '200px', background: '#f8f9fa' }}>
-                        <p className="text-muted text-center mb-0">Chat interface will be implemented here</p>
+                    <div className="mb-3">
+                        <div className="small text-muted mb-2">FAQ Support</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {abiQuickQuestions.map((question) => (
+                                <Button
+                                    key={question}
+                                    size="sm"
+                                    color="light"
+                                    onClick={() => handleSendChatMessage(question)}
+                                    disabled={chatLoading}
+                                    style={{ borderRadius: '999px' }}
+                                >
+                                    {question}
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="border rounded p-3 mb-3" style={{ minHeight: '260px', maxHeight: '320px', overflowY: 'auto', background: '#f8f9fa' }}>
+                        {chatMessages.map((message, index) => (
+                            <div
+                                key={`${message.type}-${index}`}
+                                style={{
+                                    display: 'flex',
+                                    justifyContent: message.type === 'user' ? 'flex-end' : 'flex-start',
+                                    marginBottom: '0.75rem'
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        maxWidth: '85%',
+                                        padding: '0.7rem 0.95rem',
+                                        borderRadius: '14px',
+                                        background: message.type === 'user' ? '#1976d2' : '#ffffff',
+                                        color: message.type === 'user' ? '#fff' : '#333',
+                                        border: message.type === 'user' ? 'none' : '1px solid #e0e0e0',
+                                        whiteSpace: 'pre-wrap',
+                                        lineHeight: 1.5
+                                    }}
+                                >
+                                    {message.text}
+                                </div>
+                            </div>
+                        ))}
+                        {chatLoading && (
+                            <div className="d-flex align-items-center gap-2 text-muted small">
+                                <Spinner size="sm" />
+                                Abi is typing...
+                            </div>
+                        )}
                     </div>
                     <InputGroup>
-                        <Input placeholder="Type your question..." />
-                        <Button color="primary">
+                        <Input
+                            placeholder="Ask Abi about using the system..."
+                            value={chatMessage}
+                            onChange={(e) => setChatMessage(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSendChatMessage();
+                                }
+                            }}
+                        />
+                        <Button color="primary" onClick={() => handleSendChatMessage()} disabled={chatLoading || !chatMessage.trim()}>
                             <FaComments />
                         </Button>
                     </InputGroup>

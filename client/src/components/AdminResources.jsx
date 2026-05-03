@@ -322,25 +322,22 @@ const AdminResources = () => {
 
   const getStatusBadge = (status) => {
     const colors = {
-      'Available': { bg: '#e8f5e9', color: '#4caf50' },
-      'Borrowed': { bg: '#fff3e0', color: '#ff9800' },
-      'Reserved': { bg: '#e3f2fd', color: '#1976d2' },
-      'Maintenance': { bg: '#ffebee', color: '#f44336' },
-      'Lost': { bg: '#fce4ec', color: '#e91e63' }
+      'Available': { color: '#2e7d32' },
+      'Borrowed': { color: '#c77700' },
+      'Reserved': { color: '#1565c0' },
+      'Maintenance': { color: '#c62828' },
+      'Lost': { color: '#ad1457' }
     };
-    const style = colors[status] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[status] || { color: '#4b5563' };
     
     return (
-      <Badge style={{
-        background: style.bg,
+      <span style={{
         color: style.color,
-        padding: '0.25rem 0.75rem',
-        borderRadius: '12px',
         fontSize: '0.85rem',
         fontWeight: '600'
       }}>
         {status}
-      </Badge>
+      </span>
     );
   };
 
@@ -634,16 +631,13 @@ const AdminResources = () => {
                         </span>
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                        <Badge style={{ 
-                          background: '#e3f2fd', 
-                          color: '#1976d2', 
-                          padding: '0.4rem 0.8rem',
-                          borderRadius: '12px',
+                        <span style={{
+                          color: '#355c7d',
                           fontSize: '0.85rem',
                           fontWeight: '600'
                         }}>
                           {resource.category}
-                        </Badge>
+                        </span>
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {getStatusBadge(resource.status)}

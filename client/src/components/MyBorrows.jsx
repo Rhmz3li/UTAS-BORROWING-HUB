@@ -29,14 +29,14 @@ const MyBorrows = () => {
 
     const handleReturn = async (borrowId) => {
         try {
-            await dispatch(updateBorrowing({
+            const result = await dispatch(updateBorrowing({
                 id: borrowId,
-                borrowingData: { condition_on_return: 'Good' }
+                borrowingData: { condition_on_return: 'Good', status: 'Returned' }
             })).unwrap();
-            toast.success('Resource returned successfully!');
+            toast.success(result?.message || 'Submitted successfully.');
             dispatch(fetchBorrowings());
         } catch (error) {
-            toast.error(error || 'Failed to return resource');
+            toast.error(typeof error === 'string' ? error : (error?.message || 'Failed to submit return'));
         }
     };
 
@@ -105,13 +105,19 @@ const MyBorrows = () => {
                                     </thead>
                                     <tbody>
                                         {borrows.map((borrow) => {
-                                            const isOverdue = borrow.status === 'Active' && borrow.due_date && new Date(borrow.due_date) < new Date();
+                                            const isPastDue = borrow.due_date && new Date(borrow.due_date) < new Date();
+                                            const isOverdueRow =
+                                                borrow.status === 'Overdue' ||
+                                                (borrow.status === 'Active' && isPastDue) ||
+                                                (borrow.status === 'PendingReturn' && isPastDue);
+                                            const canRequestReturn = ['Active', 'Overdue'].includes(borrow.status);
+                                            const isReturnPendingStaff = borrow.status === 'PendingReturn';
                                             const daysUntilDue = borrow.due_date ? Math.ceil((new Date(borrow.due_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
                                             
                                             return (
                                                 <tr 
                                                     key={borrow._id}
-                                                    style={isOverdue ? { background: '#fff3e0' } : {}}
+                                                    style={isOverdueRow ? { background: '#fff3e0' } : {}}
                                                 >
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div>
@@ -137,8 +143,8 @@ const MyBorrows = () => {
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                            <FaClock style={{ color: isOverdue ? '#f44336' : '#666' }} />
-                                                            <span style={{ color: isOverdue ? '#f44336' : '#666', fontWeight: isOverdue ? '600' : 'normal' }}>
+                                                            <FaClock style={{ color: isOverdueRow ? '#f44336' : '#666' }} />
+                                                            <span style={{ color: isOverdueRow ? '#f44336' : '#666', fontWeight: isOverdueRow ? '600' : 'normal' }}>
                                                                 {borrow.due_date ? new Date(borrow.due_date).toLocaleDateString('en-US', {
                                                                     year: 'numeric',
                                                                     month: 'short',
@@ -146,11 +152,11 @@ const MyBorrows = () => {
                                                                 }) : 'N/A'}
                                                             </span>
                                                         </div>
-                                                        {daysUntilDue !== null && borrow.status === 'Active' && (
-                                                            <div style={{ fontSize: '0.75rem', color: isOverdue ? '#f44336' : daysUntilDue <= 3 ? '#ff9800' : '#666', marginTop: '0.25rem' }}>
-                                                                {isOverdue 
+                                                        {daysUntilDue !== null && (canRequestReturn || isReturnPendingStaff) && (
+                                                            <div style={{ fontSize: '0.75rem', color: isOverdueRow ? '#f44336' : daysUntilDue <= 3 ? '#ff9800' : '#666', marginTop: '0.25rem' }}>
+                                                                {isOverdueRow
                                                                     ? `${Math.abs(daysUntilDue)} day(s) overdue`
-                                                                    : daysUntilDue <= 3 
+                                                                    : daysUntilDue <= 3
                                                                     ? `${daysUntilDue} day(s) remaining`
                                                                     : ''}
                                                             </div>
@@ -172,7 +178,22 @@ const MyBorrows = () => {
                                                             }}>
                                                                 <FaHourglassHalf />Pending Approval
                                                             </Badge>
-                                                        ) : isOverdue ? (
+                                                        ) : borrow.status === 'PendingReturn' ? (
+                                                            <Badge style={{
+                                                                background: '#e3f2fd',
+                                                                color: '#1565c0',
+                                                                padding: '0.4rem 0.8rem',
+                                                                borderRadius: '20px',
+                                                                fontSize: '0.85rem',
+                                                                fontWeight: '600',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.5rem',
+                                                                width: 'fit-content'
+                                                            }}>
+                                                                <FaHourglassHalf />Return pending staff
+                                                            </Badge>
+                                                        ) : isOverdueRow ? (
                                                             <Badge style={{
                                                                 background: '#ffebee',
                                                                 color: '#f44336',
@@ -200,7 +221,7 @@ const MyBorrows = () => {
                                                                 gap: '0.5rem',
                                                                 width: 'fit-content'
                                                             }}>
-                                                                <FaCheckCircle />Approved (Active)
+                                                                <FaCheckCircle />Active
                                                             </Badge>
                                                         ) : borrow.status === 'Returned' ? (
                                                             <Badge style={{
@@ -252,7 +273,7 @@ const MyBorrows = () => {
                                                                 Waiting for admin approval
                                                             </span>
                                                         )}
-                                                        {borrow.status === 'Active' && (
+                                                        {canRequestReturn && (
                                                             <Button 
                                                                 color="primary" 
                                                                 size="sm" 
@@ -264,8 +285,13 @@ const MyBorrows = () => {
                                                                     fontWeight: '600'
                                                                 }}
                                                             >
-                                                                Return
+                                                                Request return{isOverdueRow ? ' (late)' : ''}
                                                             </Button>
+                                                        )}
+                                                        {isReturnPendingStaff && (
+                                                            <span style={{ fontSize: '0.85rem', color: '#1565c0', fontStyle: 'italic' }}>
+                                                                Waiting for hub staff to confirm receipt — item stays on loan until then.
+                                                            </span>
                                                         )}
                                                         {borrow.status === 'Returned' && borrow.return_date && (
                                                             <span style={{ fontSize: '0.85rem', color: '#666' }}>

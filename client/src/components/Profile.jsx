@@ -665,9 +665,9 @@ const Profile = () => {
                                                 >
                                                     <option value="">Select your department</option>
                                                     <option value="College of Information Technology">College of Information Technology</option>
-                                                    <option value="College of Engineering and Technology">College of Engineering and Technology</option>
+                                                    <option value="College of Engineering">College of Engineering</option>
                                                     <option value="College of Business Studies">College of Business Studies</option>
-                                                    <option value="College of Education">College of Education</option>
+                                                    <option value="College of Creative Industries">College of Creative Industries</option>
                                                 </Input>
                                                 {departmentError && (
                                                     <div className="text-danger small mt-1">{departmentError}</div>

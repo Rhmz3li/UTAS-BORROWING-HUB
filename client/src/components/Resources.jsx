@@ -29,7 +29,8 @@ const Resources = () => {
     const [reserveData, setReserveData] = useState({
         pickup_date: '',
         expiry_date: '',
-        terms_accepted: false
+        terms_accepted: false,
+        payment_method: ''
     });
     const [isBorrowing, setIsBorrowing] = useState(false);
     const [isReserving, setIsReserving] = useState(false);
@@ -73,7 +74,7 @@ const Resources = () => {
             resource.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             resource.description?.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesCategory = !selectedCategory || resource.category === selectedCategory;
-        return matchesSearch && matchesCategory && resource.status === 'Available';
+        return matchesSearch && matchesCategory;
     }) : [];
 
     const getCategoryIcon = (category) => {
@@ -124,7 +125,8 @@ const Resources = () => {
         setReserveData({
             pickup_date: pickupDate.toISOString().split('T')[0],
             expiry_date: expiryDate.toISOString().split('T')[0],
-            terms_accepted: false
+            terms_accepted: false,
+            payment_method: ''
         });
         setReserveModal(true);
     };
@@ -147,27 +149,46 @@ const Resources = () => {
             return;
         }
 
+        const needsDeposit = selectedResource &&
+            (selectedResource.requires_payment || (selectedResource.payment_amount && selectedResource.payment_amount > 0));
+
+        if (needsDeposit && !reserveData.payment_method) {
+            toast.error('Please select a payment method for the security deposit');
+            return;
+        }
+
         try {
             setIsReserving(true);
-            await dispatch(addReservation({
+            const result = await dispatch(addReservation({
                 resource_id: selectedResource._id,
                 pickup_date: new Date(reserveData.pickup_date).toISOString(),
                 expiry_date: new Date(reserveData.expiry_date).toISOString(),
-                terms_accepted: true
+                terms_accepted: true,
+                payment_method: needsDeposit ? reserveData.payment_method : null,
+                payment_amount: needsDeposit
+                    ? Math.min(selectedResource.payment_amount || 0, 10)
+                    : 0
             })).unwrap();
-            
-            toast.success(
-                `Reservation request submitted successfully! ⏳ Pending admin approval. The resource will be reserved for future pickup.`,
-                { autoClose: 6000 }
-            );
+
             setReserveModal(false);
             setSelectedResource(null);
             setReserveData({
                 pickup_date: '',
                 expiry_date: '',
-                terms_accepted: false
+                terms_accepted: false,
+                payment_method: ''
             });
             dispatch(fetchDevices()); // Refresh resources
+
+            if (needsDeposit && reserveData.payment_method === 'Card' && result?.data?.payment_id) {
+                toast.info('Reservation request created. Complete the online card payment to send it to admin for approval.');
+                navigate('/payments', { state: { openPaymentId: result.data.payment_id } });
+            } else {
+                toast.success(
+                    'Reservation request submitted successfully! Pending admin approval.',
+                    { autoClose: 6000 }
+                );
+            }
         } catch (error) {
             // Handle error from rejectWithValue (payload) or regular error (message)
             let errorMessage = 'Failed to create reservation';
@@ -206,22 +227,19 @@ const Resources = () => {
 
         try {
             setIsBorrowing(true);
+            const selectedPaymentMethod = needsDeposit ? borrowData.payment_method : null;
             // Use Redux action to add borrowing - this will update Redux store
-            await dispatch(addBorrowing({
+            const result = await dispatch(addBorrowing({
                 deviceId: selectedResource._id,
                 returnDate: borrowData.due_date,
                 conditionBefore: borrowData.condition_on_borrow || 'Good',
-                paymentMethod: needsDeposit ? borrowData.payment_method : null,
+                paymentMethod: selectedPaymentMethod,
                 paymentAmount: needsDeposit
                     ? Math.min(selectedResource.payment_amount || 0, 10)
                     : 0
             })).unwrap();
 
             const location = selectedResource.location || 'IT Borrowing Hub - Lab 2';
-            toast.success(
-                `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
-                { autoClose: 6000 }
-            );
             setBorrowModal(false);
             setSelectedResource(null);
             setBorrowData({
@@ -232,9 +250,14 @@ const Resources = () => {
             });
             dispatch(fetchDevices()); // Refresh resources
             
-            // If there is a security deposit, guide user directly to the Payments page
-            if (needsDeposit) {
-                navigate('/payments');
+            if (selectedPaymentMethod === 'Card' && result?.data?.payment_id) {
+                toast.info('Borrow request created. Complete the online card payment to send it to admin for approval.');
+                navigate('/payments', { state: { openPaymentId: result.data.payment_id } });
+            } else {
+                toast.success(
+                    `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
+                    { autoClose: 6000 }
+                );
             }
             // Don't navigate - the borrow is already added to Redux store and will appear in My Borrows page
         } catch (error) {
@@ -368,6 +391,9 @@ const Resources = () => {
                         filteredResources.map((resource) => {
                             const CategoryIcon = getCategoryIcon(resource.category);
                             const imageUrl = resource.image || (resource.images && resource.images.length > 0 ? resource.images[0] : null);
+                            const isAvailableForAction = resource.status === 'Available' && (resource.available_quantity ?? 0) > 0;
+                            const deptBlocked = isDeptMismatch(resource);
+                            const canBorrowOrReserve = isAvailableForAction && !deptBlocked;
                             
                             return (
                                 <Col md={4} lg={3} key={resource._id} className="mb-4">
@@ -482,6 +508,11 @@ const Resources = () => {
                                             </CardText>
                                             
                                             <div className="mb-3" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                {resource.status && resource.status !== 'Available' && (
+                                                    <Badge color="secondary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+                                                        {resource.status}
+                                                    </Badge>
+                                                )}
                                                 <Badge 
                                                     color="primary" 
                                                     style={{ 
@@ -534,7 +565,7 @@ const Resources = () => {
                                                     color="primary"
                                                     block
                                                     size="sm"
-                                                    disabled={isDeptMismatch(resource)}
+                                                    disabled={!canBorrowOrReserve}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         handleBorrowClick(resource);
@@ -542,24 +573,30 @@ const Resources = () => {
                                                     style={{
                                                         fontWeight: '600',
                                                         fontSize: '0.875rem',
-                                                        background: isDeptMismatch(resource) ? '#c8c8c8' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                        background: !canBorrowOrReserve ? '#c8c8c8' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                                                         border: 'none',
                                                         borderRadius: '10px',
                                                         padding: '0.6rem',
-                                                        boxShadow: isDeptMismatch(resource) ? 'none' : '0 4px 12px rgba(102, 126, 234, 0.3)',
+                                                        boxShadow: !canBorrowOrReserve ? 'none' : '0 4px 12px rgba(102, 126, 234, 0.3)',
                                                         transition: 'all 0.3s ease',
-                                                        cursor: isDeptMismatch(resource) ? 'not-allowed' : 'pointer',
-                                                        opacity: isDeptMismatch(resource) ? 0.6 : 1
+                                                        cursor: !canBorrowOrReserve ? 'not-allowed' : 'pointer',
+                                                        opacity: !canBorrowOrReserve ? 0.6 : 1
                                                     }}
-                                                    title={isDeptMismatch(resource) ? `Only available for ${resource.department} department` : 'Borrow this resource now'}
+                                                    title={
+                                                        deptBlocked
+                                                            ? `Only available for ${resource.department} department`
+                                                            : !isAvailableForAction
+                                                                ? `This resource is currently ${resource.status || 'unavailable'}`
+                                                                : 'Borrow this resource now'
+                                                    }
                                                     onMouseEnter={(e) => {
-                                                        if (!isDeptMismatch(resource)) {
+                                                        if (canBorrowOrReserve) {
                                                             e.currentTarget.style.transform = 'translateY(-2px)';
                                                             e.currentTarget.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.4)';
                                                         }
                                                     }}
                                                     onMouseLeave={(e) => {
-                                                        if (!isDeptMismatch(resource)) {
+                                                        if (canBorrowOrReserve) {
                                                             e.currentTarget.style.transform = 'translateY(0)';
                                                             e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
                                                         }
@@ -571,8 +608,14 @@ const Resources = () => {
                                                     color="info"
                                                     block
                                                     size="sm"
-                                                    disabled={isDeptMismatch(resource)}
-                                                    title={isDeptMismatch(resource) ? `Only available for ${resource.department} department` : '⏳ Reserve - Requires Admin Approval: Reserve for future pickup, borrow period starts when picked up'}
+                                                    disabled={!canBorrowOrReserve}
+                                                    title={
+                                                        deptBlocked
+                                                            ? `Only available for ${resource.department} department`
+                                                            : !isAvailableForAction
+                                                                ? `This resource is currently ${resource.status || 'unavailable'}`
+                                                                : '⏳ Reserve - Requires Admin Approval: Reserve for future pickup, borrow period starts when picked up'
+                                                    }
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         handleReserveClick(resource);
@@ -580,23 +623,23 @@ const Resources = () => {
                                                     style={{
                                                         fontWeight: '600',
                                                         fontSize: '0.875rem',
-                                                        background: isDeptMismatch(resource) ? '#c8c8c8' : 'linear-gradient(135deg, #17a2b8 0%, #138496 100%)',
+                                                        background: !canBorrowOrReserve ? '#c8c8c8' : 'linear-gradient(135deg, #17a2b8 0%, #138496 100%)',
                                                         border: 'none',
                                                         borderRadius: '10px',
                                                         padding: '0.6rem',
-                                                        boxShadow: isDeptMismatch(resource) ? 'none' : '0 4px 12px rgba(23, 162, 184, 0.3)',
+                                                        boxShadow: !canBorrowOrReserve ? 'none' : '0 4px 12px rgba(23, 162, 184, 0.3)',
                                                         transition: 'all 0.3s ease',
-                                                        cursor: isDeptMismatch(resource) ? 'not-allowed' : 'pointer',
-                                                        opacity: isDeptMismatch(resource) ? 0.6 : 1
+                                                        cursor: !canBorrowOrReserve ? 'not-allowed' : 'pointer',
+                                                        opacity: !canBorrowOrReserve ? 0.6 : 1
                                                     }}
                                                     onMouseEnter={(e) => {
-                                                        if (!isDeptMismatch(resource)) {
+                                                        if (canBorrowOrReserve) {
                                                             e.currentTarget.style.transform = 'translateY(-2px)';
                                                             e.currentTarget.style.boxShadow = '0 6px 16px rgba(23, 162, 184, 0.4)';
                                                         }
                                                     }}
                                                     onMouseLeave={(e) => {
-                                                        if (!isDeptMismatch(resource)) {
+                                                        if (canBorrowOrReserve) {
                                                             e.currentTarget.style.transform = 'translateY(0)';
                                                             e.currentTarget.style.boxShadow = '0 4px 12px rgba(23, 162, 184, 0.3)';
                                                         }
@@ -746,8 +789,6 @@ const Resources = () => {
                                             <option value="">Choose payment method...</option>
                                             <option value="Cash">Cash</option>
                                             <option value="Card">Card</option>
-                                            <option value="Online">Online</option>
-                                            <option value="Bank Transfer">Bank Transfer</option>
                                         </Input>
                                     </FormGroup>
                                 </div>
@@ -915,6 +956,24 @@ const Resources = () => {
                                     Select when you plan to return this resource (max {selectedResource.max_borrow_days || 7} days from pickup date)
                                 </small>
                             </FormGroup>
+
+                            {(selectedResource.requires_payment || (selectedResource.payment_amount && selectedResource.payment_amount > 0)) && (
+                                <FormGroup className="mt-3">
+                                    <Label style={{ fontWeight: '600' }}>
+                                        Payment Method <span style={{ color: 'red' }}>*</span>
+                                    </Label>
+                                    <Input
+                                        type="select"
+                                        value={reserveData.payment_method}
+                                        onChange={(e) => setReserveData({ ...reserveData, payment_method: e.target.value })}
+                                        required
+                                    >
+                                        <option value="">Choose payment method...</option>
+                                        <option value="Cash">Cash</option>
+                                        <option value="Card">Card</option>
+                                    </Input>
+                                </FormGroup>
+                            )}
 
                             <FormGroup check className="mt-3">
                                 <Label check>

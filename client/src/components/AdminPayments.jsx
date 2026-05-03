@@ -94,6 +94,57 @@ const AdminPayments = () => {
     }
   };
 
+  /** Record refund after staff returns money (Completed → Refunded) */
+  const quickRefundToUser = async (payment) => {
+    if (payment.status !== 'Completed') return;
+    const name = payment.user_id?.full_name || 'the user';
+    const msg =
+      `Record refund of ${payment.amount?.toFixed(2)} OMR for "${name}"?\n\n` +
+      `Use this only after returning the money to the user at the hub.`;
+    if (!window.confirm(msg)) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `http://localhost:5000/admin/payments/${payment._id}/status`,
+        {
+          status: 'Refunded',
+          notes: 'Deposit refund confirmed by admin'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Refund recorded successfully');
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to record refund');
+    }
+  };
+
+  /** Cancel a pending borrow/reservation deposit the user no longer needs to pay */
+  const quickCancelPendingDeposit = async (payment) => {
+    if (payment.status !== 'Pending' || !['Resource', 'Reservation'].includes(payment.payment_type)) return;
+    if (
+      !window.confirm(
+        'Cancel this pending deposit payment request?'
+      )
+    )
+      return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `http://localhost:5000/admin/payments/${payment._id}/status`,
+        {
+          status: 'Failed',
+          notes: 'Pending deposit cancelled by admin'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Payment request cancelled successfully');
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Cancellation failed');
+    }
+  };
+
   const getStatusBadge = (status) => {
     const colors = {
       'Pending': { bg: '#fff3e0', color: '#ff9800' },
@@ -310,6 +361,7 @@ const AdminPayments = () => {
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Transaction ID</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Date</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Type</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600', textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
@@ -361,8 +413,11 @@ const AdminPayments = () => {
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {getStatusBadge(payment.status)}
                       </td>
+                      <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', fontSize: '0.85rem', color: '#555' }}>
+                        {payment.payment_type || '—'}
+                      </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <Button
                             size="sm"
                             onClick={() => handleView(payment)}
@@ -371,6 +426,30 @@ const AdminPayments = () => {
                           >
                             <FaEye />
                           </Button>
+                          {payment.status === 'Completed' && (
+                            <Button
+                              size="sm"
+                              onClick={() => quickRefundToUser(payment)}
+                              style={{
+                                background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)',
+                                border: 'none'
+                              }}
+                              title="Mark refunded"
+                            >
+                              <FaUndo className="me-1" />
+                              Refund
+                            </Button>
+                          )}
+                          {payment.status === 'Pending' && ['Resource', 'Reservation'].includes(payment.payment_type) && (
+                            <Button
+                              size="sm"
+                              color="warning"
+                              onClick={() => quickCancelPendingDeposit(payment)}
+                              title="Cancel pending deposit request"
+                            >
+                              Cancel Request
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             onClick={() => handleStatusChange(payment)}
@@ -443,6 +522,7 @@ const AdminPayments = () => {
                 </span></p>
                 <p><strong>Method:</strong> {getMethodBadge(selectedPayment.payment_method)}</p>
                 <p><strong>Status:</strong> {getStatusBadge(selectedPayment.status)}</p>
+                <p><strong>Type:</strong> {selectedPayment.payment_type || 'N/A'}</p>
                 {selectedPayment.transaction_id && (
                   <p><strong>Transaction ID:</strong> <code>{selectedPayment.transaction_id}</code></p>
                 )}
@@ -486,6 +566,30 @@ const AdminPayments = () => {
           <Button color="secondary" onClick={() => setViewModalOpen(false)}>
             Close
           </Button>
+          {selectedPayment?.status === 'Completed' && (
+            <Button
+              style={{
+                background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)',
+                border: 'none',
+                color: '#fff'
+              }}
+              onClick={() => {
+                setViewModalOpen(false);
+                quickRefundToUser(selectedPayment);
+              }}
+            >
+              <FaUndo className="me-1" /> Refund to User
+            </Button>
+          )}
+          {selectedPayment?.status === 'Pending' &&
+            ['Resource', 'Reservation'].includes(selectedPayment.payment_type) && (
+              <Button color="warning" onClick={() => {
+                setViewModalOpen(false);
+                quickCancelPendingDeposit(selectedPayment);
+              }}>
+                Cancel Deposit Request
+              </Button>
+            )}
           <Button 
             color="primary" 
             onClick={() => {

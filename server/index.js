@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import OpenAI from 'openai';
 import UserModel from './models/User.js';
 
 // Load environment variables
@@ -26,6 +27,300 @@ import AnnouncementModel from './models/Announcement.js';
 let app = express();
 app.use(cors());
 app.use(express.json());
+
+// Borrows that still hold a copy out until staff confirms return (inventory not restored)
+const BORROW_OUT_STATUSES = ['Claimed', 'Active', 'Overdue', 'PendingReturn'];
+const USER_BLOCKING_BORROW_STATUSES = ['PendingApproval', ...BORROW_OUT_STATUSES];
+const USER_BLOCKING_RESERVATION_STATUSES = ['Pending', 'Confirmed'];
+const openaiClient = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+function getBorrowDurationDays(startDate, endDate, fallbackDays = 1) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const msPerDay = 1000 * 60 * 60 * 24;
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return Math.max(1, fallbackDays || 1);
+    }
+
+    const diffDays = Math.ceil((end - start) / msPerDay);
+    return Math.max(1, diffDays || fallbackDays || 1);
+}
+
+function passesLuhnCheck(cardNumber) {
+    const digits = String(cardNumber || '').replace(/\D/g, '');
+    if (digits.length < 13 || digits.length > 19) {
+        return false;
+    }
+
+    let sum = 0;
+    let shouldDouble = false;
+
+    for (let i = digits.length - 1; i >= 0; i -= 1) {
+        let digit = parseInt(digits.charAt(i), 10);
+        if (Number.isNaN(digit)) {
+            return false;
+        }
+
+        if (shouldDouble) {
+            digit *= 2;
+            if (digit > 9) {
+                digit -= 9;
+            }
+        }
+
+        sum += digit;
+        shouldDouble = !shouldDouble;
+    }
+
+    return sum % 10 === 0;
+}
+
+function validateCardPayload(cardDetails) {
+    const digitsOnly = String(cardDetails?.card_number || '').replace(/\D/g, '');
+    const cardHolder = String(cardDetails?.card_holder || '').trim();
+    const expiry = String(cardDetails?.expiry_date || '').trim();
+    const cvv = String(cardDetails?.cvv || '').trim();
+
+    if (!passesLuhnCheck(digitsOnly)) {
+        return { valid: false, message: 'Invalid card number. Please enter a valid card number.' };
+    }
+
+    if (!/^[A-Za-z][A-Za-z\s.'-]{1,}$/.test(cardHolder)) {
+        return { valid: false, message: 'Invalid card holder name. Please enter the name as shown on the card.' };
+    }
+
+    if (!/^\d{2}\/\d{2}$/.test(expiry)) {
+        return { valid: false, message: 'Invalid expiry date. Use MM/YY format.' };
+    }
+
+    const [mmStr, yyStr] = expiry.split('/');
+    const month = parseInt(mmStr, 10);
+    const year = parseInt(yyStr, 10);
+    if (Number.isNaN(month) || Number.isNaN(year) || month < 1 || month > 12) {
+        return { valid: false, message: 'Invalid expiry month. Please enter a valid expiry date.' };
+    }
+
+    const now = new Date();
+    const currentYear = now.getFullYear() % 100;
+    const currentMonth = now.getMonth() + 1;
+    if (year < currentYear || (year === currentYear && month < currentMonth)) {
+        return { valid: false, message: 'Card expiry date cannot be in the past.' };
+    }
+
+    if (!/^\d{3,4}$/.test(cvv)) {
+        return { valid: false, message: 'Invalid CVV. Please enter a valid 3 or 4 digit security code.' };
+    }
+
+    return {
+        valid: true,
+        normalized: {
+            card_number: digitsOnly,
+            card_holder: cardHolder,
+            expiry_date: expiry,
+            cvv
+        }
+    };
+}
+
+function getAbiFallbackReply(messageText = '') {
+    const text = String(messageText || '').toLowerCase();
+
+    const faqEntries = [
+        {
+            matches: ['borrow', 'استعارة', 'checkout', 'due date'],
+            reply: 'To borrow a device, open Resources, choose an available item, click Borrow, select the due date, and submit the request. If the item requires a deposit and you choose Card, complete the payment in Payments first, then wait for admin approval.'
+        },
+        {
+            matches: ['reservation', 'reserve', 'حجز', 'pickup date'],
+            reply: 'To make a reservation, open Resources, choose the item, click Reserve, select the pickup date and expiry date, then submit the request. If a deposit is required and Card is selected, complete the payment from Payments before admin approval.'
+        },
+        {
+            matches: ['payment', 'deposit', 'card', 'cash', 'دفع', 'عربون'],
+            reply: 'You can review pending deposits in My Payments. Card payments can be completed online, while cash payments are recorded according to the request type. After a completed deposit, the admin is notified that the request is ready for review.'
+        },
+        {
+            matches: ['return', 'pending return', 'إرجاع', 'lost', 'overdue'],
+            reply: 'You can request a return from My Borrows when the borrow is active. After that, staff must confirm the physical return. If the item is overdue, damaged, or lost, the system may create a penalty.'
+        },
+        {
+            matches: ['notification', 'notice', 'إشعار'],
+            reply: 'You can check updates in Notifications. The system sends notices for request submission, payment completion, approvals, rejections, return handling, and refunds.'
+        },
+        {
+            matches: ['profile', 'password', 'account', 'ملف', 'حساب'],
+            reply: 'You can manage your personal details from Profile, and you can update your password and other account information there.'
+        },
+        {
+            matches: ['qr', 'barcode', 'scan', 'مسح'],
+            reply: 'QR and barcode scanning are used to identify resources quickly inside the system. If you are a regular user, focus on browsing, borrowing, reservations, payments, notifications, and profile features.'
+        }
+    ];
+
+    const matchedFaq = faqEntries.find((entry) => entry.matches.some((keyword) => text.includes(keyword)));
+    if (matchedFaq) {
+        return matchedFaq.reply;
+    }
+
+    return 'I am Abi, your UTAS Borrowing Hub assistant. I can help only with this system: resources, borrowing, reservations, payments, returns, notifications, and profile actions. Please ask me about how to use one of these features.';
+}
+
+function isAbiSystemQuestion(messageText = '') {
+    const text = String(messageText || '').toLowerCase().trim();
+    if (!text) {
+        return true;
+    }
+
+    const systemKeywords = [
+        'utas', 'borrowing hub', 'system', 'resource', 'resources', 'device', 'item',
+        'borrow', 'borrowing', 'checkout', 'reserve', 'reservation', 'pickup',
+        'payment', 'payments', 'deposit', 'card', 'cash', 'refund',
+        'return', 'overdue', 'penalty', 'fine',
+        'notification', 'notifications', 'profile', 'account', 'password',
+        'qr', 'barcode', 'approval', 'approve', 'reject',
+        'استعارة', 'اعارة', 'حجز', 'دفع', 'بطاقة', 'كاش', 'عربون',
+        'ارجاع', 'إرجاع', 'اشعار', 'إشعار', 'حساب', 'ملف', 'مورد', 'موارد',
+        'جهاز', 'أجهزة', 'طلب', 'موافقة', 'رفض', 'غرامة'
+    ];
+
+    return systemKeywords.some((keyword) => text.includes(keyword));
+}
+
+async function getAbiReply({ message, user }) {
+    if (!isAbiSystemQuestion(message)) {
+        return 'I can only help with the UTAS Borrowing Hub system. Please ask me about resources, borrowing, reservations, payments, returns, notifications, or your profile.';
+    }
+
+    if (!openaiClient) {
+        return getAbiFallbackReply(message);
+    }
+
+    const systemPrompt = `
+You are Abi, the UTAS Borrowing Hub assistant.
+Only answer questions about using this system.
+Allowed topics:
+- browsing and searching resources
+- borrowing devices
+- reservations
+- payments and deposits
+- notifications
+- returns, overdue items, and penalties
+- profile and account actions
+
+Rules:
+- If the user asks about anything outside this system, politely refuse and redirect them to system-related help.
+- Do not invent policies or features not present in the system.
+- Keep answers concise, practical, and user-focused.
+- When useful, give 2-4 short steps.
+`;
+
+    try {
+        const completion = await openaiClient.responses.create({
+            model: 'gpt-4o-mini',
+            input: [
+                {
+                    role: 'system',
+                    content: systemPrompt
+                },
+                {
+                    role: 'user',
+                    content: `User role: ${user?.role || 'Student'}\nUser department: ${user?.department || 'Unknown'}\nQuestion: ${message}`
+                }
+            ],
+            max_output_tokens: 220
+        });
+
+        const text = completion.output_text?.trim();
+        return text || getAbiFallbackReply(message);
+    } catch (error) {
+        console.error('Abi assistant fallback due to AI error:', error.message);
+        return getAbiFallbackReply(message);
+    }
+}
+
+async function getUserSameResourceBlocker(userId, resourceId) {
+    const existingBorrow = await BorrowModel.findOne({
+        user_id: userId,
+        resource_id: resourceId,
+        status: { $in: USER_BLOCKING_BORROW_STATUSES }
+    }).select('_id status');
+    if (existingBorrow) {
+        return {
+            type: 'Borrow',
+            status: existingBorrow.status
+        };
+    }
+
+    const existingReservation = await ReservationModel.findOne({
+        user_id: userId,
+        resource_id: resourceId,
+        status: { $in: USER_BLOCKING_RESERVATION_STATUSES }
+    }).select('_id status');
+    if (existingReservation) {
+        return {
+            type: 'Reservation',
+            status: existingReservation.status
+        };
+    }
+
+    return null;
+}
+
+/**
+ * When a borrow/reservation is rejected, cancelled, or deleted: mark Completed deposits as Refunded
+ * (staff returns money per procedure), or mark Pending payment requests as Failed (no longer payable).
+ */
+async function releaseLinkedDepositPayment(paymentId, processedByUserId, reasonTag) {
+    if (!paymentId) return { action: 'none' };
+    const payment = await PaymentModel.findById(paymentId);
+    if (!payment) return { action: 'none' };
+    if (!['Resource', 'Reservation'].includes(payment.payment_type)) return { action: 'skip_type' };
+    if (payment.status === 'Refunded' || payment.status === 'Failed') return { action: 'already_final' };
+
+    const tag = ` | Auto: ${reasonTag}`;
+    const uid = payment.user_id;
+    const prefKey = payment.payment_type === 'Reservation' ? 'reservationConfirmation' : 'borrowApproval';
+
+    if (payment.status === 'Completed') {
+        payment.status = 'Refunded';
+        payment.processed_by = processedByUserId || null;
+        payment.updated_at = Date.now();
+        payment.notes = ((payment.notes || '') + tag).trim();
+        await payment.save();
+        if (uid && (await shouldSendInAppNotification(uid, prefKey))) {
+            await NotificationModel.create({
+                user_id: uid,
+                title: 'Security deposit refunded (record)',
+                message: `Your deposit of ${payment.amount} OMR has been marked as refunded in the system (${reasonTag}). If you already paid at the hub, staff will return it according to UTAS procedures.`,
+                type: 'Success',
+                related_type: 'Payment',
+                related_id: payment._id
+            });
+        }
+        return { action: 'refunded', payment };
+    }
+
+    if (payment.status === 'Pending') {
+        payment.status = 'Failed';
+        payment.processed_by = processedByUserId || null;
+        payment.updated_at = Date.now();
+        payment.notes = ((payment.notes || '') + tag).trim();
+        await payment.save();
+        if (uid && (await shouldSendInAppNotification(uid, prefKey))) {
+            await NotificationModel.create({
+                user_id: uid,
+                title: 'Payment request cancelled',
+                message: `The pending payment of ${payment.amount} OMR for your ${payment.payment_type === 'Reservation' ? 'reservation' : 'borrow request'} was cancelled (${reasonTag}).`,
+                type: 'Info',
+                related_type: 'Payment',
+                related_id: payment._id
+            });
+        }
+        return { action: 'cancelled_pending', payment };
+    }
+
+    return { action: 'unchanged', payment };
+}
 
 // Rate limiting for password reset requests
 const resetRequestAttempts = new Map(); // email -> { count, lastAttempt }
@@ -111,15 +406,37 @@ const logPasswordResetEvent = (event, details) => {
     console.log(`[PASSWORD_RESET_LOG] ${JSON.stringify(logEntry)}`);
 };
 
-const conStr = "mongodb+srv://admin123:admin123@utas-borrowing-hub.qlzohvg.mongodb.net/UTAS-BORROWING-HUB?retryWrites=true&w=majority&appName=UTAS-BORROWING-HUB";
-mongoose
-  .connect(conStr)
-  .then(() => {
-    console.log("Connected to MongoDB successfully!");
-  })
-  .catch((error) => {
-    console.error("MongoDB connection error:", error);
-  });
+const mongoSrvUri = process.env.MONGO_URI || 'mongodb+srv://admin123:admin123@utas-borrowing-hub.qlzohvg.mongodb.net/UTAS-BORROWING-HUB?retryWrites=true&w=majority&appName=UTAS-BORROWING-HUB';
+const mongoDirectUri = process.env.MONGO_DIRECT_URI || 'mongodb://admin123:admin123@ac-gbqaucr-shard-00-00.qlzohvg.mongodb.net:27017,ac-gbqaucr-shard-00-01.qlzohvg.mongodb.net:27017,ac-gbqaucr-shard-00-02.qlzohvg.mongodb.net:27017/UTAS-BORROWING-HUB?ssl=true&replicaSet=atlas-uccjid-shard-0&authSource=admin&retryWrites=true&w=majority&appName=UTAS-BORROWING-HUB';
+// Use a shorter server selection timeout so the app can fall back quickly
+// to the direct Atlas URI when SRV DNS lookups fail on this network.
+const mongoConnectionOptions = {
+    serverSelectionTimeoutMS: 10000
+};
+
+async function connectToMongoDB() {
+    if (!mongoSrvUri && !mongoDirectUri) {
+        throw new Error('MongoDB connection string is not configured. Set MONGO_URI or MONGO_DIRECT_URI in server/.env');
+    }
+
+    if (mongoSrvUri) {
+        try {
+            await mongoose.connect(mongoSrvUri, mongoConnectionOptions);
+            console.log('Connected to MongoDB successfully using SRV URI');
+            return;
+        } catch (error) {
+            console.error('MongoDB SRV connection failed:', error.message || error);
+        }
+    }
+
+    if (mongoDirectUri) {
+        await mongoose.connect(mongoDirectUri, mongoConnectionOptions);
+        console.log('Connected to MongoDB successfully using direct URI fallback');
+        return;
+    }
+
+    throw new Error('MongoDB connection failed and no direct fallback URI is configured');
+}
 
 // ==================== AUTH ROUTES ====================
 
@@ -707,38 +1024,11 @@ app.get("/resources", async (req, res) => {
         const { status, category, search, college, page = 1, limit = 10 } = req.query;
         const query = {};
         
-        // Check if user is authenticated and get their department
-        let userDepartment = null;
-        let userRole = null;
-        try {
-            const token = req.headers.authorization?.split(' ')[1];
-            if (token) {
-                const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
-                const user = await UserModel.findById(decoded.id);
-                if (user) {
-                    userDepartment = user.department;
-                    userRole = user.role;
-                }
-            }
-        } catch (authError) {
-            // If auth fails, continue without department filter (for public access)
-        }
-        
         if (status) query.status = status;
         if (category) query.category = category;
         if (college) query.college = college;
         
-        // Filter by department: Users can only see resources from their department
-        // Admin and Assistant can see all resources
-        if (userDepartment && !['Admin', 'Assistant'].includes(userRole)) {
-            // If user has a department, show only resources from their department or resources without department assigned
-            query.$or = [
-                { department: userDepartment },
-                { department: null },
-                { department: '' },
-                { department: { $exists: false } }
-            ];
-        }
+        // Everyone can list all resources; borrow/reserve restrictions are enforced on POST routes.
         
         // Add search filter - combine with department filter if exists
         if (search) {
@@ -795,40 +1085,11 @@ app.get("/resources", async (req, res) => {
 
 app.get("/showDevices", async (req, res) => {
     try {
-        const { status, category, search, page = 1, limit = 10 } = req.query;
+        const { status, category, search, page = 1, limit = 10000 } = req.query;
         const query = {};
-        
-        // Check if user is authenticated and get their department
-        let userDepartment = null;
-        let userRole = null;
-        try {
-            const token = req.headers.authorization?.split(' ')[1];
-            if (token) {
-                const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
-                const user = await UserModel.findById(decoded.id);
-                if (user) {
-                    userDepartment = user.department;
-                    userRole = user.role;
-                }
-            }
-        } catch (authError) {
-            // If auth fails, continue without department filter (for public access)
-        }
         
         if (status) query.status = status;
         if (category) query.category = category;
-        
-        // Filter by department: Users can only see resources from their department
-        // Admin and Assistant can see all resources
-        if (userDepartment && !['Admin', 'Assistant'].includes(userRole)) {
-            // If user has a department, show only resources from their department or resources without department assigned
-            query.$or = [
-                { department: userDepartment },
-                { department: null },
-                { department: '' },
-                { department: { $exists: false } }
-            ];
-        }
         
         // Add search filter - combine with department filter if exists
         if (search) {
@@ -892,7 +1153,7 @@ app.post("/resources/:id/check-availability", async (req, res) => {
         // Check active borrows that overlap with requested period
         const overlappingBorrows = await BorrowModel.find({
             resource_id: req.params.id,
-            status: 'Active',
+            status: { $in: BORROW_OUT_STATUSES },
             $or: [
                 {
                     borrow_date: { $lte: dueDate },
@@ -916,7 +1177,7 @@ app.post("/resources/:id/check-availability", async (req, res) => {
             // Find the earliest return date
             const earliestReturn = await BorrowModel.findOne({
                 resource_id: req.params.id,
-                status: 'Active'
+                status: { $in: BORROW_OUT_STATUSES }
             }).sort({ due_date: 1 });
 
             return res.json({
@@ -943,10 +1204,10 @@ app.get("/resources/:id/availability", async (req, res) => {
             return res.status(404).json({ success: false, message: 'Resource not found' });
         }
 
-        // Get all active borrows
+        // Get all borrows that still occupy the resource
         const activeBorrows = await BorrowModel.find({
             resource_id: req.params.id,
-            status: 'Active'
+            status: { $in: BORROW_OUT_STATUSES }
         }).sort({ due_date: 1 });
 
         const borrowedDates = activeBorrows.map(borrow => ({
@@ -1389,7 +1650,7 @@ app.delete("/resources/:id", async (req, res) => {
         // Prevent deleting resources that are currently in use.
         const activeBorrow = await BorrowModel.findOne({
             resource_id: resource._id,
-            status: { $in: ['Active', 'Overdue', 'PendingApproval'] }
+            status: { $in: ['Approved', 'Claimed', 'Active', 'Overdue', 'PendingReturn', 'PendingApproval'] }
         }).select('_id status');
 
         if (activeBorrow) {
@@ -1477,14 +1738,12 @@ app.post("/borrow/checkout", async (req, res) => {
             return res.status(500).json({ message: "Resource is not available for borrowing" });
         }
 
-        const existingBorrow = await BorrowModel.findOne({
-            user_id: user._id,
-            resource_id,
-            status: 'Active'
-        });
-
-        if (existingBorrow) {
-            return res.status(500).json({ message: "You already have an active borrow for this resource" });
+        const sameResourceBlocker = await getUserSameResourceBlocker(user._id, resource_id);
+        if (sameResourceBlocker) {
+            return res.status(400).json({
+                success: false,
+                message: `You already have a ${sameResourceBlocker.type.toLowerCase()} record (${sameResourceBlocker.status}) for this resource. You cannot borrow/reserve the same resource twice.`
+            });
         }
 
         // Check for pending penalties - block borrowing if user has unpaid penalties
@@ -1513,6 +1772,8 @@ app.post("/borrow/checkout", async (req, res) => {
         }
 
         const borrowDate = req.body.borrow_date ? new Date(req.body.borrow_date) : new Date();
+        const requestedDueDate = new Date(due_date);
+        const borrowDurationDays = getBorrowDurationDays(borrowDate, requestedDueDate, resource.max_borrow_days || 1);
         
         // Handle payment if required
         let paymentId = null;
@@ -1523,6 +1784,12 @@ app.post("/borrow/checkout", async (req, res) => {
                 return res.status(400).json({ 
                     success: false,
                     message: 'Payment method is required for this resource' 
+                });
+            }
+            if (!['Cash', 'Card'].includes(payment_method)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Only Cash or Card payment methods are allowed'
                 });
             }
             
@@ -1539,13 +1806,13 @@ app.post("/borrow/checkout", async (req, res) => {
             await newPayment.save();
             paymentId = newPayment._id;
             
-            // Notify admins about payment
+            // Notify admins that a deposit record was created for this borrow request
             const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
             for (const admin of admins) {
                 await NotificationModel.create({
                     user_id: admin._id,
-                    title: 'New Payment Request',
-                    message: `${user.full_name} (${user.email}) has made a payment request of ${payment_amount || resource.payment_amount} OMR via ${payment_method} for borrowing ${resource.name}.`,
+                    title: 'Borrow Deposit Created',
+                    message: `${user.full_name} (${user.email}) selected ${payment_method} for the ${payment_amount || resource.payment_amount} OMR deposit on borrow request "${resource.name}". Approval should wait until the payment is completed.`,
                     type: 'Info',
                     related_type: 'Payment',
                     related_id: newPayment._id
@@ -1568,7 +1835,8 @@ app.post("/borrow/checkout", async (req, res) => {
             payment_amount: resource.requires_payment ? (payment_amount || resource.payment_amount) : 0,
             payment_method: resource.requires_payment ? payment_method : null,
             payment_status: resource.requires_payment ? 'Pending' : 'Not Required',
-            payment_id: paymentId
+            payment_id: paymentId,
+            borrow_duration_days: borrowDurationDays
         });
 
         // Update user's terms acceptance (one-time acceptance)
@@ -1578,6 +1846,10 @@ app.post("/borrow/checkout", async (req, res) => {
             await user.save();
         }
         await newBorrow.save();
+
+        if (paymentId) {
+            await PaymentModel.updateOne({ _id: paymentId }, { $set: { borrow_id: newBorrow._id } });
+        }
 
         // DON'T decrease quantity yet - wait for admin approval
         // Quantity will be decreased when admin approves the borrow
@@ -1603,7 +1875,7 @@ app.post("/borrow/checkout", async (req, res) => {
             await NotificationModel.create({
                 user_id: user._id,
                 title: 'Borrow Request Submitted',
-                message: `Your borrow request for ${resource.name} has been submitted and is pending admin approval. You will be notified once it's approved. ${resource.requires_payment && resource.payment_amount > 0 ? `Payment of ${resource.payment_amount} OMR via ${payment_method} will be processed upon approval.` : ''}`,
+                message: `Your borrow request for ${resource.name} has been submitted and is pending admin approval. ${resource.requires_payment && resource.payment_amount > 0 ? payment_method === 'Card' ? `Please complete the online card payment of ${resource.payment_amount} OMR in the Payments page first. The admin will review your request after the payment is completed.` : `Your ${resource.payment_amount} OMR deposit via ${payment_method} must be confirmed before final approval.` : 'You will be notified once it is approved.'}`,
                 type: 'Info',
                 related_type: 'Borrow',
                 related_id: newBorrow._id
@@ -1618,6 +1890,11 @@ app.post("/borrow/checkout", async (req, res) => {
               <div style="padding:24px;">
                 <p>Dear ${user.full_name},</p>
                 <p>Your borrow request for <strong>${resource.name}</strong> has been submitted and is <strong>pending admin approval</strong>.</p>
+                ${resource.requires_payment && resource.payment_amount > 0
+                    ? payment_method === 'Card'
+                        ? `<p>Please complete the <strong>online card payment</strong> of <strong>${resource.payment_amount} OMR</strong> from the Payments page. After payment, the admin will be notified to review your request.</p>`
+                        : `<p>Your <strong>${resource.payment_amount} OMR</strong> deposit via <strong>${payment_method}</strong> must be confirmed before the admin can approve the borrow request.</p>`
+                    : ''}
                 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
                   <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${resource.name}</td></tr>
                   <tr><td style="padding:6px;color:#555;">Category</td><td style="padding:6px;">${resource.category || 'N/A'}</td></tr>
@@ -1668,9 +1945,9 @@ app.get("/borrow/my-borrows", async (req, res) => {
         const { status } = req.query;
         const query = { user_id: decoded.id };
         
-        // Allow filtering by any valid status including PendingApproval
-        if (status && ['Active', 'Returned', 'Overdue', 'Lost', 'PendingApproval'].includes(status)) {
-            query.status = status;
+        // Allow filtering by any valid status
+        if (status && ['Claimed', 'Active', 'Returned', 'Overdue', 'Lost', 'PendingApproval', 'PendingReturn'].includes(status)) {
+            query.status = status === 'Claimed' ? { $in: ['Claimed', 'Active'] } : status;
         }
         // If no status filter, show all borrows (including PendingApproval)
 
@@ -1708,12 +1985,83 @@ app.put("/borrow/:id/return", async (req, res) => {
             return res.status(500).json({ message: "Borrow record not found" });
         }
 
-        if (borrow.user_id.toString() !== user._id.toString() && !['Admin', 'Assistant'].includes(user.role)) {
+        const isStaff = ['Admin', 'Assistant'].includes(user.role);
+        const isOwner = borrow.user_id.toString() === user._id.toString();
+
+        if (!isOwner && !isStaff) {
             return res.status(500).json({ message: "Not authorized" });
         }
 
         if (borrow.status === 'Returned' || borrow.status === 'Lost') {
             return res.status(500).json({ message: "Resource already returned or marked as lost" });
+        }
+
+        // Borrower (non-staff): only submit a return request — stock is released when staff confirms
+        if (isOwner && !isStaff) {
+            if (borrow.status === 'PendingReturn') {
+                return res.status(400).json({
+                    message: 'Return request already submitted. Please wait for staff to confirm receipt at the hub.'
+                });
+            }
+            if (!['Claimed', 'Active', 'Overdue'].includes(borrow.status)) {
+                return res.status(400).json({
+                    message: 'Only physically claimed or overdue borrows can be submitted for return. Pending or approved pickup requests must be completed by staff first.'
+                });
+            }
+            if (status === 'Lost') {
+                return res.status(400).json({
+                    message: 'Please hand the item to staff. Only administrators can mark a resource as lost.'
+                });
+            }
+            borrow.status = 'PendingReturn';
+            borrow.return_requested_at = new Date();
+            if (notes !== undefined && notes !== null) {
+                borrow.notes = notes;
+            }
+            borrow.updated_at = new Date();
+            await borrow.save();
+
+            const resName = borrow.resource_id?.name || 'resource';
+            const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+            for (const adm of admins) {
+                if (await shouldSendInAppNotification(adm._id, 'borrowApproval')) {
+                    await NotificationModel.create({
+                        user_id: adm._id,
+                        title: 'Return pending confirmation',
+                        message: `${user.full_name} (${user.email}) submitted a return for "${resName}". Confirm receipt in Borrow Management to release inventory.`,
+                        type: 'Info',
+                        related_type: 'Borrow',
+                        related_id: borrow._id
+                    });
+                }
+            }
+            for (const adm of admins) {
+                if (adm.email) {
+                    await sendEmail({
+                        to: adm.email,
+                        subject: `Return to confirm – ${resName} – UTAS Borrowing Hub`,
+                        html: `<div style="${emailStyle}">${emailHeader}
+                          <div style="padding:24px;">
+                            <p>Dear ${adm.full_name},</p>
+                            <p><strong>${user.full_name}</strong> has submitted a return for <strong>${resName}</strong>.</p>
+                            <p>Please verify physical receipt in <strong>Borrow Management</strong> and use <strong>Mark Return</strong> to complete the return and update availability.</p>
+                          </div>${emailFooter}</div>`
+                    });
+                }
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: borrow,
+                message: 'Return request submitted. Staff will confirm when the item is received; the resource stays on loan until then.'
+            });
+        }
+
+        // Staff: finalize return (or lost) — restores inventory when status is Returned
+        if (!['Claimed', 'Active', 'Overdue', 'PendingReturn'].includes(borrow.status)) {
+            return res.status(400).json({
+                message: 'Only physically claimed, overdue, or pending-return borrows can be finalized. Pending or approved pickup requests must be completed by staff first.'
+            });
         }
 
         const returnDate = new Date();
@@ -1737,12 +2085,13 @@ app.put("/borrow/:id/return", async (req, res) => {
 
         const resource = await ResourceModel.findById(borrow.resource_id._id);
         
-        // Only return quantity if status is Returned (not Lost)
+        // Restore shelf count only when the item is actually returned (not lost)
         if (finalStatus === 'Returned') {
-            // Return the quantity
-            resource.available_quantity += 1;
+            resource.available_quantity = Math.min(
+                resource.total_quantity || 1,
+                resource.available_quantity + 1
+            );
             
-            // Update status to Available if quantity > 0
             if (resource.available_quantity > 0) {
                 resource.status = 'Available';
             }
@@ -1973,6 +2322,14 @@ app.post("/reservations", async (req, res) => {
             });
         }
 
+        const sameResourceBlocker = await getUserSameResourceBlocker(user._id, resource_id);
+        if (sameResourceBlocker) {
+            return res.status(400).json({
+                success: false,
+                message: `You already have a ${sameResourceBlocker.type.toLowerCase()} record (${sameResourceBlocker.status}) for this resource. You cannot borrow/reserve the same resource twice.`
+            });
+        }
+
         // Check if resource is already borrowed during the requested pickup date
         const pickupDate = new Date(pickup_date);
         const expiryDate = expiry_date ? new Date(expiry_date) : new Date(pickupDate);
@@ -1981,7 +2338,7 @@ app.post("/reservations", async (req, res) => {
         // Check for active borrows that overlap with the requested dates
         const overlappingBorrows = await BorrowModel.find({
             resource_id: resource._id,
-            status: 'Active',
+            status: { $in: ['Claimed', 'Active', 'Overdue', 'PendingReturn'] },
             $or: [
                 {
                     borrow_date: { $lte: expiryDate },
@@ -1994,7 +2351,7 @@ app.post("/reservations", async (req, res) => {
             // Find the earliest return date
             const earliestReturn = await BorrowModel.findOne({
                 resource_id: resource._id,
-                status: 'Active'
+                status: { $in: BORROW_OUT_STATUSES }
             }).sort({ due_date: 1 });
 
             const suggestedDate = earliestReturn 
@@ -2038,6 +2395,12 @@ app.post("/reservations", async (req, res) => {
                     message: 'Payment method is required for this resource' 
                 });
             }
+            if (!['Cash', 'Card'].includes(payment_method)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Only Cash or Card payment methods are allowed'
+                });
+            }
             
             // Create payment record
             const newPayment = new PaymentModel({
@@ -2052,13 +2415,13 @@ app.post("/reservations", async (req, res) => {
             await newPayment.save();
             paymentId = newPayment._id;
             
-            // Notify admins about payment
+            // Notify admins that a deposit record was created for this reservation request
             const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
             for (const admin of admins) {
                 await NotificationModel.create({
                     user_id: admin._id,
-                    title: 'New Payment Request',
-                    message: `${user.full_name} (${user.email}) has made a payment request of ${payment_amount || resource.payment_amount} OMR via ${payment_method} for reserving ${resource.name}.`,
+                    title: 'Reservation Deposit Created',
+                    message: `${user.full_name} (${user.email}) selected ${payment_method} for the ${payment_amount || resource.payment_amount} OMR deposit on reservation "${resource.name}". Approval should wait until the payment is completed.`,
                     type: 'Info',
                     related_type: 'Payment',
                     related_id: newPayment._id
@@ -2087,6 +2450,10 @@ app.post("/reservations", async (req, res) => {
         }
         await newReservation.save();
 
+        if (paymentId) {
+            await PaymentModel.updateOne({ _id: paymentId }, { $set: { reservation_id: newReservation._id } });
+        }
+
         // RESERVE: Don't decrease quantity - only reserve for future pickup
         // Quantity will be decreased when reservation is confirmed and picked up
         // This allows the resource to remain available for others until pickup date
@@ -2099,13 +2466,18 @@ app.post("/reservations", async (req, res) => {
             html: `<div style="${emailStyle}">${emailHeader}
               <div style="padding:24px;">
                 <p>Dear ${user.full_name},</p>
-                <p>Your reservation request has been <strong>submitted</strong> and is pending confirmation.</p>
+                <p>Your reservation request has been <strong>submitted</strong> and is pending admin approval.</p>
+                ${resource.requires_payment && resource.payment_amount > 0
+                    ? payment_method === 'Card'
+                        ? `<p>Please complete the <strong>online card payment</strong> of <strong>${resource.payment_amount} OMR</strong> from the Payments page. After payment, the admin will be notified to review your reservation.</p>`
+                        : `<p>Your <strong>${resource.payment_amount} OMR</strong> deposit via <strong>${payment_method}</strong> must be confirmed before the admin can approve the reservation.</p>`
+                    : ''}
                 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
                   <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${resource.name}</td></tr>
                   <tr><td style="padding:6px;color:#555;">Pickup Date</td><td style="padding:6px;">${pickupDateObj.toLocaleDateString()}</td></tr>
                   <tr><td style="padding:6px;color:#555;">Status</td><td style="padding:6px;">Pending</td></tr>
                 </table>
-                <p>You will receive another email once the reservation is confirmed by an admin.</p>
+                <p>You will receive another email once your reservation is reviewed.</p>
               </div>${emailFooter}</div>`
         });
 
@@ -2124,7 +2496,7 @@ app.post("/reservations", async (req, res) => {
                       <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;">${resource.name}</td></tr>
                       <tr><td style="padding:6px;color:#555;">Pickup Date</td><td style="padding:6px;">${pickupDateObj.toLocaleDateString()}</td></tr>
                     </table>
-                    <p>Please log in to the admin panel to review this reservation.</p>
+                    <p>Please log in to the admin panel to review this reservation. ${resource.requires_payment && resource.payment_amount > 0 ? 'If payment method is Card, approval should wait until the deposit is completed.' : ''}</p>
                   </div>${emailFooter}</div>`
             });
         }
@@ -2190,11 +2562,15 @@ app.put("/reservations/:id/cancel", async (req, res) => {
         reservation.status = 'Cancelled';
         await reservation.save();
 
+        await releaseLinkedDepositPayment(reservation.payment_id, decoded.id, 'reservation cancelled by user');
+
         // RESERVE: Only return quantity if reservation was confirmed (quantity was decreased at confirmation)
         // Pending reservations don't decrease quantity, so nothing to return
         if (resource && wasConfirmed) {
-            resource.available_quantity += 1;
-            // Update status back to Available if quantity > 0
+            resource.available_quantity = Math.min(
+                resource.total_quantity || 1,
+                resource.available_quantity + 1
+            );
             if (resource.available_quantity > 0 && resource.status === 'Reserved') {
                 resource.status = 'Available';
             }
@@ -2319,11 +2695,31 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
             });
         }
 
+        if (reservation.requires_payment && reservation.payment_amount > 0) {
+            if (!reservation.payment_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot confirm reservation. Security deposit payment record not found.'
+                });
+            }
+
+            const reservationPayment = await PaymentModel.findById(reservation.payment_id);
+            if (!reservationPayment || reservationPayment.status !== 'Completed') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot confirm reservation. Security deposit has not been confirmed yet. Please confirm the payment in Payments Management first.',
+                    depositStatus: reservationPayment ? reservationPayment.status : 'Missing'
+                });
+            }
+
+            reservation.payment_status = 'Paid';
+        }
+
         // RESERVE: Check if resource is available for pickup (quantity NOT decreased yet for reservations)
         // Only check actual available quantity and active borrows
         const activeBorrowsCount = await BorrowModel.countDocuments({
             resource_id: resource._id,
-            status: 'Active'
+            status: { $in: BORROW_OUT_STATUSES }
         });
         
         if (resource.available_quantity <= 0 || activeBorrowsCount >= resource.total_quantity) {
@@ -2341,7 +2737,7 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
 
         const overlappingBorrows = await BorrowModel.find({
             resource_id: resource._id,
-            status: 'Active',
+            status: { $in: ['Claimed', 'Active', 'Overdue', 'PendingReturn'] },
             $or: [
                 {
                     borrow_date: { $lte: dueDate },
@@ -2357,27 +2753,44 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
             });
         }
 
-        reservation.status = 'Confirmed';
-        reservation.updated_at = new Date();
-        await reservation.save();
-
-        // RESERVE: NOW decrease quantity when reservation is confirmed (user will pick up soon)
-        resource.available_quantity -= 1;
-        if (resource.available_quantity === 0) {
-            resource.status = 'Reserved';
+        // RESERVE: atomically hold one unit when reservation is confirmed (avoids over-booking under concurrency)
+        const resourceAfterDec = await ResourceModel.findOneAndUpdate(
+            { _id: resource._id, available_quantity: { $gte: 1 } },
+            { $inc: { available_quantity: -1 } },
+            { new: true }
+        );
+        if (!resourceAfterDec) {
+            return res.status(400).json({
+                success: false,
+                message: 'Resource is not available for pickup. All copies are currently borrowed.'
+            });
         }
-        await resource.save();
+        try {
+            reservation.status = 'Confirmed';
+            reservation.updated_at = new Date();
+            await reservation.save();
+        } catch (saveErr) {
+            await ResourceModel.updateOne({ _id: resource._id }, { $inc: { available_quantity: 1 } });
+            throw saveErr;
+        }
+        if (resourceAfterDec.available_quantity === 0) {
+            await ResourceModel.updateOne({ _id: resource._id }, { $set: { status: 'Reserved' } });
+        }
+
+        const paymentRequiredAfterConfirmation = reservation.requires_payment && reservation.payment_amount > 0;
 
         // Send notification to user (respect notification preferences)
         const resUserId = reservation.user_id?._id || reservation.user_id;
         if (resUserId && (await shouldSendInAppNotification(resUserId, 'reservationConfirmation'))) {
             await NotificationModel.create({
                 user_id: resUserId,
-                title: 'Reservation Confirmed',
-                message: `Your reservation for "${resource.name}" has been confirmed. Please pick it up on ${pickupDate.toLocaleDateString()} from ${resource.location || 'IT Borrowing Hub - Lab 2'}. The resource is now reserved for you.`,
+                title: paymentRequiredAfterConfirmation ? 'Reservation Confirmed - Payment Required' : 'Reservation Confirmed',
+                message: paymentRequiredAfterConfirmation
+                    ? `Your reservation for "${resource.name}" is confirmed. Please pay the security deposit (${reservation.payment_amount} OMR) in the Payments page before final borrow approval.`
+                    : `Your reservation for "${resource.name}" has been confirmed. Please pick it up on ${pickupDate.toLocaleDateString()} from ${resource.location || 'IT Borrowing Hub - Lab 2'}. The resource is now reserved for you.`,
                 type: 'Success',
-                related_type: 'Reservation',
-                related_id: reservation._id
+                related_type: paymentRequiredAfterConfirmation ? 'Payment' : 'Reservation',
+                related_id: paymentRequiredAfterConfirmation ? (reservation.payment_id || reservation._id) : reservation._id
             });
         }
 
@@ -2396,7 +2809,10 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
                       <tr><td style="padding:6px;color:#555;">Pickup Date</td><td style="padding:6px;">${pickupDate.toLocaleDateString()}</td></tr>
                       <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${resource.location || 'IT Borrowing Hub - Lab 2'}</td></tr>
                     </table>
-                    <p>Please pick up your reservation on time.</p>
+                    ${paymentRequiredAfterConfirmation
+                        ? `<p style="margin:12px 0;color:#c62828;"><strong>Action required:</strong> Please pay the security deposit of ${reservation.payment_amount} OMR from your Payments page. Your reservation will only be converted to an active borrow after payment confirmation by admin.</p>`
+                        : `<p>Please pick up your reservation on time.</p>`
+                    }
                   </div>${emailFooter}</div>`
             });
         }
@@ -2461,7 +2877,7 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
         // Check if resource is still available (should be, since it's confirmed)
         const activeBorrowsCount = await BorrowModel.countDocuments({
             resource_id: resource._id,
-            status: 'Active'
+            status: { $in: BORROW_OUT_STATUSES }
         });
         
         if (activeBorrowsCount >= resource.total_quantity) {
@@ -2475,13 +2891,13 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
         const existingBorrow = await BorrowModel.findOne({
             user_id: reservation.user_id._id,
             resource_id: resource._id,
-            status: 'Active'
+            status: { $in: BORROW_OUT_STATUSES }
         });
 
         if (existingBorrow) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
-                message: 'User already has an active borrow for this resource' 
+                message: 'User already has an active borrow or pending return for this resource'
             });
         }
 
@@ -2494,35 +2910,67 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
             });
         }
 
-        // Create borrow record
-        const borrowDate = new Date(reservation.pickup_date);
-        const finalDueDate = due_date ? new Date(due_date) : new Date(borrowDate);
-        if (!due_date) {
-            finalDueDate.setDate(finalDueDate.getDate() + (resource.max_borrow_days || 7));
+        // If reservation requires a security deposit, ensure payment is completed before conversion
+        if (reservation.requires_payment && reservation.payment_amount > 0) {
+            if (!reservation.payment_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot approve reservation. Security deposit payment record not found.'
+                });
+            }
+
+            const reservationPayment = await PaymentModel.findById(reservation.payment_id);
+            if (!reservationPayment || reservationPayment.status !== 'Completed') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot approve reservation. Security deposit has not been confirmed yet. Please confirm the payment in Payments Management first.',
+                    depositStatus: reservationPayment ? reservationPayment.status : 'Missing'
+                });
+            }
         }
 
+        // Create borrow record
+        const requestedBorrowDate = new Date(reservation.pickup_date);
+        const requestedDueDate = due_date ? new Date(due_date) : new Date(requestedBorrowDate);
+        if (!due_date) {
+            requestedDueDate.setDate(requestedDueDate.getDate() + (resource.max_borrow_days || 7));
+        }
+
+        const borrowDurationDays = getBorrowDurationDays(requestedBorrowDate, requestedDueDate, resource.max_borrow_days || 1);
+        const approvalDate = new Date();
+        const finalDueDate = new Date(approvalDate);
+        finalDueDate.setDate(finalDueDate.getDate() + borrowDurationDays);
         const newBorrow = new BorrowModel({
             user_id: reservation.user_id._id,
             resource_id: resource._id,
-            borrow_date: borrowDate,
+            borrow_date: approvalDate,
             due_date: finalDueDate,
             condition_on_borrow: condition_on_borrow || 'Good',
             checked_out_by: admin._id,
             status: 'Active',
+            approved_at: new Date(),
             terms_accepted: true,
-            terms_accepted_at: reservationUser.terms_accepted_at || new Date()
+            terms_accepted_at: reservationUser.terms_accepted_at || new Date(),
+            requires_payment: reservation.requires_payment || false,
+            payment_amount: reservation.requires_payment ? reservation.payment_amount : 0,
+            payment_method: reservation.requires_payment ? reservation.payment_method : null,
+            payment_status: reservation.requires_payment ? 'Paid' : 'Not Required',
+            payment_id: reservation.payment_id || null,
+            borrow_duration_days: borrowDurationDays
         });
         await newBorrow.save();
 
-        // RESERVE->BORROW: Quantity already decreased when reservation was confirmed
-        // Just update status if needed
-        if (resource.available_quantity === 0) {
-            resource.status = 'Borrowed';
+        // RESERVE->BORROW: Stock was already decreased at reservation confirm — only sync status (avoid stale full-document save)
+        const freshResource = await ResourceModel.findById(resource._id).lean();
+        if (freshResource && freshResource.available_quantity === 0) {
+            await ResourceModel.updateOne({ _id: resource._id }, { $set: { status: 'Borrowed' } });
         }
-        await resource.save();
 
         // Update reservation status
         reservation.status = 'Completed';
+        if (reservation.requires_payment) {
+            reservation.payment_status = 'Paid';
+        }
         reservation.updated_at = new Date();
         await reservation.save();
 
@@ -2532,10 +2980,29 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
             await NotificationModel.create({
                 user_id: resUserId2,
                 title: 'Borrow Approved',
-                message: `Your reservation for "${resource.name}" has been approved and converted to a borrow. Due date: ${finalDueDate.toLocaleDateString()}.`,
+                message: `Your reservation for "${resource.name}" has been approved and converted to an active borrow. You can now go to the borrowing section to collect the device from ${resource.location || 'IT Borrowing Hub - Lab 2'}.`,
                 type: 'Success',
                 related_type: 'Borrow',
                 related_id: newBorrow._id
+            });
+        }
+
+        const reservedUser = reservation.user_id;
+        if (reservedUser?.email) {
+            await sendEmail({
+                to: reservedUser.email,
+                subject: 'Reservation Approved – UTAS Borrowing Hub',
+                html: `<div style="${emailStyle}">${emailHeader}
+                  <div style="padding:24px;">
+                    <p>Dear ${reservedUser.full_name},</p>
+                    <p>Your reservation for <strong>${resource.name}</strong> has been approved and converted to an <strong>active borrow</strong>.</p>
+                    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                      <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${resource.name}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${resource.location || 'IT Borrowing Hub - Lab 2'}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Due Date</td><td style="padding:6px;">${finalDueDate.toLocaleDateString()}</td></tr>
+                    </table>
+                    <p>You can now go to the borrowing section to collect the device.</p>
+                  </div>${emailFooter}</div>`
             });
         }
 
@@ -2585,13 +3052,18 @@ app.delete("/admin/reservations/:id", async (req, res) => {
         if (reservation.status === 'Confirmed') {
             const resource = await ResourceModel.findById(reservation.resource_id._id);
             if (resource) {
-                resource.available_quantity += 1;
+                resource.available_quantity = Math.min(
+                    resource.total_quantity || 1,
+                    resource.available_quantity + 1
+                );
                 if (resource.status === 'Borrowed' && resource.available_quantity > 0) {
                     resource.status = 'Available';
                 }
                 await resource.save();
             }
         }
+
+        await releaseLinkedDepositPayment(reservation.payment_id, admin._id, 'reservation deleted by admin');
 
         // Delete the reservation
         await ReservationModel.findByIdAndDelete(req.params.id);
@@ -2696,21 +3168,42 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
             borrow.payment_status = 'Paid';
         }
 
-        // BORROW APPROVAL: Update borrow status to Active and decrease quantity
-        borrow.status = 'Active';
-        borrow.borrow_date = new Date(); // Start borrow period from approval date
-        borrow.updated_at = new Date();
-        await borrow.save();
-
-        // Decrease available quantity when approved
-        resource.available_quantity -= 1;
-        
-        // Update status only if all items are borrowed
-        if (resource.available_quantity === 0) {
-            resource.status = 'Borrowed';
+        // BORROW APPROVAL: atomically reserve one unit, then activate the borrow
+        const resourceAfterDec = await ResourceModel.findOneAndUpdate(
+            { _id: resource._id, available_quantity: { $gte: 1 } },
+            { $inc: { available_quantity: -1 } },
+            { new: true }
+        );
+        if (!resourceAfterDec) {
+            return res.status(400).json({
+                success: false,
+                message: 'Resource is not available. All copies are currently borrowed or reserved.'
+            });
         }
-        
-        await resource.save();
+        if (resourceAfterDec.available_quantity === 0) {
+            await ResourceModel.updateOne({ _id: resource._id }, { $set: { status: 'Borrowed' } });
+        }
+
+        const approvalDate = new Date();
+        const borrowDurationDays = borrow.borrow_duration_days || getBorrowDurationDays(borrow.borrow_date, borrow.due_date, resource.max_borrow_days || 1);
+        const recalculatedDueDate = new Date(approvalDate);
+        recalculatedDueDate.setDate(recalculatedDueDate.getDate() + borrowDurationDays);
+
+        borrow.status = 'Active';
+        borrow.approved_at = approvalDate;
+        borrow.borrow_date = approvalDate;
+        borrow.due_date = recalculatedDueDate;
+        borrow.updated_at = approvalDate;
+        try {
+            await borrow.save();
+        } catch (saveErr) {
+            await ResourceModel.updateOne({ _id: resource._id }, { $inc: { available_quantity: 1 } });
+            const rFix = await ResourceModel.findById(resource._id);
+            if (rFix && rFix.available_quantity > 0 && rFix.status === 'Borrowed') {
+                await ResourceModel.updateOne({ _id: resource._id }, { $set: { status: 'Available' } });
+            }
+            throw saveErr;
+        }
 
         // Note: Deposit payment status is managed via Payments Management.
 
@@ -2720,13 +3213,19 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
             { status: 'Completed', updated_at: Date.now() }
         );
 
+        const pickupLoc = resource.location || 'IT Borrowing Hub - Lab 2';
+        const cashExtra =
+            borrow.payment_method === 'Cash'
+                ? ` You selected Cash: please go to ${pickupLoc} for pickup / any on-site cash steps. | اخترت الدفع نقدًا: بعد موافقة الأدمن يرجى التوجّه إلى ${pickupLoc} لاستلام المادة أو إتمام الإجراءات في المركز.`
+                : '';
+
         // Notify user (respect notification preferences)
         const borrowUserIdApproved = borrow.user_id?._id || borrow.user_id;
         if (borrowUserIdApproved && (await shouldSendInAppNotification(borrowUserIdApproved, 'borrowApproval'))) {
             await NotificationModel.create({
                 user_id: borrowUserIdApproved,
                 title: 'Borrow Approved',
-                message: `Your borrow request for ${resource.name} has been approved. Please pick it up from: ${resource.location || 'IT Borrowing Hub - Lab 2'}. Due date: ${new Date(borrow.due_date).toLocaleDateString()}. ${borrow.requires_payment && borrow.payment_status === 'Pending' ? 'Payment has been processed.' : ''}`,
+                message: `Your borrow request for ${resource.name} has been approved. You can now go to the borrowing section at ${pickupLoc} to collect the device. Due: ${recalculatedDueDate.toLocaleDateString()}.${cashExtra}`,
                 type: 'Success',
                 related_type: 'Borrow',
                 related_id: borrow._id
@@ -2736,6 +3235,10 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
         // Email: notify user borrow was approved
         const approvedUser = borrow.user_id;
         if (approvedUser?.email) {
+            const cashEmailBlock =
+                borrow.payment_method === 'Cash'
+                    ? `<p style="margin:16px 0;padding:12px;background:#e8f5e9;border-radius:8px;border:1px solid #4caf50;"><strong>Cash payment:</strong> Please go to <strong>${pickupLoc}</strong> to pick up the item and complete any on-site steps.<br/><strong>الدفع نقدًا:</strong> يرجى التوجّه إلى <strong>${pickupLoc}</strong> لاستلام المادة بعد موافقة الأدمن.</p>`
+                    : '';
             await sendEmail({
                 to: approvedUser.email,
                 subject: 'Borrow Request Approved – UTAS Borrowing Hub',
@@ -2745,10 +3248,11 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
                     <p>Great news! Your borrow request has been <strong style="color:#2e7d32;">approved</strong>.</p>
                     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
                       <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${resource.name}</td></tr>
-                      <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${resource.location || 'IT Borrowing Hub - Lab 2'}</td></tr>
-                      <tr><td style="padding:6px;color:#555;">Due Date</td><td style="padding:6px;">${new Date(borrow.due_date).toLocaleDateString()}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${pickupLoc}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Due Date</td><td style="padding:6px;">${recalculatedDueDate.toLocaleDateString()}</td></tr>
                     </table>
-                    <p>Please pick up your item from the location above.</p>
+                    ${cashEmailBlock}
+                    <p>You can now go to the borrowing section at <strong>${pickupLoc}</strong> to collect your item.</p>
                   </div>${emailFooter}</div>`
             });
         }
@@ -2763,6 +3267,92 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
         res.status(500).json({ 
             success: false,
             message: error.message || 'Failed to approve borrow' 
+        });
+    }
+});
+
+// Mark an approved borrow as physically claimed / handed over
+app.put("/admin/borrows/:id/claim", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const admin = await UserModel.findById(decoded.id);
+        if (!admin || !['Admin', 'Assistant'].includes(admin.role)) {
+            return res.status(403).json({ message: 'Not authorized' });
+        }
+
+        const borrow = await BorrowModel.findById(req.params.id)
+            .populate('resource_id')
+            .populate('user_id');
+
+        if (!borrow) {
+            return res.status(404).json({ success: false, message: 'Borrow not found' });
+        }
+
+        if (borrow.status !== 'Approved') {
+            return res.status(400).json({
+                success: false,
+                message: `Borrow is not awaiting physical collection. Current status: ${borrow.status}`
+            });
+        }
+
+        const claimDate = new Date();
+        const borrowDurationDays = borrow.borrow_duration_days || getBorrowDurationDays(borrow.borrow_date, borrow.due_date, borrow.resource_id?.max_borrow_days || 1);
+        const recalculatedDueDate = new Date(claimDate);
+        recalculatedDueDate.setDate(recalculatedDueDate.getDate() + borrowDurationDays);
+
+        borrow.status = 'Claimed';
+        borrow.borrow_date = claimDate;
+        borrow.due_date = recalculatedDueDate;
+        borrow.claimed_at = claimDate;
+        borrow.updated_at = claimDate;
+        await borrow.save();
+
+        const pickupLoc = borrow.resource_id?.location || 'IT Borrowing Hub - Lab 2';
+        const borrowUserId = borrow.user_id?._id || borrow.user_id;
+        if (borrowUserId && (await shouldSendInAppNotification(borrowUserId, 'borrowApproval'))) {
+            await NotificationModel.create({
+                user_id: borrowUserId,
+                title: 'Borrow Physically Claimed',
+                message: `Your item "${borrow.resource_id?.name || 'resource'}" has been physically collected from ${pickupLoc}. Your due date is ${recalculatedDueDate.toLocaleDateString()}.`,
+                type: 'Success',
+                related_type: 'Borrow',
+                related_id: borrow._id
+            });
+        }
+
+        if (borrow.user_id?.email) {
+            await sendEmail({
+                to: borrow.user_id.email,
+                subject: 'Borrow Collected – UTAS Borrowing Hub',
+                html: `<div style="${emailStyle}">${emailHeader}
+                  <div style="padding:24px;">
+                    <p>Dear ${borrow.user_id.full_name},</p>
+                    <p>Your item has been <strong>physically collected</strong> from the hub.</p>
+                    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                      <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${borrow.resource_id?.name || 'N/A'}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Collection Location</td><td style="padding:6px;">${pickupLoc}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Borrow Start</td><td style="padding:6px;">${claimDate.toLocaleDateString()}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Due Date</td><td style="padding:6px;">${recalculatedDueDate.toLocaleDateString()}</td></tr>
+                    </table>
+                  </div>${emailFooter}</div>`
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: borrow,
+            message: 'Borrow marked as physically claimed successfully'
+        });
+    } catch (error) {
+        console.error('Mark claimed error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to mark borrow as physically claimed'
         });
     }
 });
@@ -2802,16 +3392,24 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
 
         const { reason } = req.body;
 
+        const refundInfo = await releaseLinkedDepositPayment(borrow.payment_id, admin._id, 'borrow request rejected');
+
         // Delete the borrow request
         await BorrowModel.findByIdAndDelete(req.params.id);
 
         // Notify user about rejection (respect notification preferences)
         const rejectUserId = borrow.user_id?._id || borrow.user_id;
         if (rejectUserId && (await shouldSendInAppNotification(rejectUserId, 'borrowRejection'))) {
+            const refundNote =
+                refundInfo.action === 'refunded'
+                    ? ' Any confirmed security deposit has been marked as refunded in the system — staff will return it per UTAS procedures.'
+                    : refundInfo.action === 'cancelled_pending'
+                        ? ' Any pending deposit payment for this request has been cancelled in the system.'
+                        : '';
             await NotificationModel.create({
                 user_id: rejectUserId,
                 title: 'Borrow Request Rejected',
-                message: `Your borrow request for ${borrow.resource_id.name} has been rejected. ${reason ? `Reason: ${reason}` : ''}`,
+                message: `Your borrow request for ${borrow.resource_id.name} has been rejected. ${reason ? `Reason: ${reason}` : ''}${refundNote}`,
                 type: 'Error',
                 related_type: 'Borrow',
                 related_id: null
@@ -2832,6 +3430,8 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
                       <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${borrow.resource_id.name}</td></tr>
                       ${reason ? `<tr><td style="padding:6px;color:#555;">Reason</td><td style="padding:6px;">${reason}</td></tr>` : ''}
                     </table>
+                    ${refundInfo.action === 'refunded' ? '<p><strong>Deposit:</strong> If you already paid a security deposit and it was confirmed, it is now marked as <strong>refunded</strong> in the system. Please contact the hub to collect your refund if applicable.</p>' : ''}
+                    ${refundInfo.action === 'cancelled_pending' ? '<p><strong>Deposit:</strong> Any pending payment record for this borrow request has been cancelled — you do not need to complete that payment.</p>' : ''}
                     <p>If you have questions, please contact the admin team.</p>
                   </div>${emailFooter}</div>`
             });
@@ -2839,6 +3439,7 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
 
         res.status(200).json({
             success: true,
+            refundInfo,
             message: 'Borrow request rejected successfully'
         });
     } catch (error) {
@@ -2846,6 +3447,185 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
         res.status(500).json({ 
             success: false,
             message: error.message || 'Failed to reject borrow' 
+        });
+    }
+});
+
+// Reject reservation request (Admin/Assistant only)
+app.put("/admin/reservations/:id/reject", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const admin = await UserModel.findById(decoded.id);
+
+        if (!['Admin', 'Assistant'].includes(admin.role)) {
+            return res.status(403).json({ message: "Not authorized" });
+        }
+
+        const reservation = await ReservationModel.findById(req.params.id)
+            .populate('resource_id')
+            .populate('user_id');
+
+        if (!reservation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reservation not found'
+            });
+        }
+
+        if (!['Pending', 'Confirmed'].includes(reservation.status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Reservation cannot be rejected. Current status: ${reservation.status}`
+            });
+        }
+
+        const { reason } = req.body;
+        const wasConfirmed = reservation.status === 'Confirmed';
+
+        if (wasConfirmed) {
+            const resource = await ResourceModel.findById(reservation.resource_id?._id || reservation.resource_id);
+            if (resource) {
+                resource.available_quantity = Math.min(
+                    resource.total_quantity || 1,
+                    resource.available_quantity + 1
+                );
+                if (resource.status === 'Reserved' && resource.available_quantity > 0) {
+                    resource.status = 'Available';
+                }
+                await resource.save();
+            }
+        }
+
+        const refundInfo = await releaseLinkedDepositPayment(reservation.payment_id, admin._id, 'reservation rejected by admin');
+
+        reservation.status = 'Cancelled';
+        reservation.updated_at = new Date();
+        if (reason) {
+            reservation.notes = [reservation.notes, `Admin rejection reason: ${reason}`].filter(Boolean).join(' | ');
+        }
+        await reservation.save();
+
+        const reservationUserId = reservation.user_id?._id || reservation.user_id;
+        if (reservationUserId && (await shouldSendInAppNotification(reservationUserId, 'reservationConfirmation'))) {
+            const refundNote =
+                refundInfo.action === 'refunded'
+                    ? ' Any confirmed security deposit has been marked as refunded in the system.'
+                    : refundInfo.action === 'cancelled_pending'
+                        ? ' Any pending deposit payment for this reservation has been cancelled in the system.'
+                        : '';
+
+            await NotificationModel.create({
+                user_id: reservationUserId,
+                title: 'Reservation Rejected',
+                message: `Your reservation for ${reservation.resource_id?.name || 'the selected resource'} has been rejected by admin.${reason ? ` Reason: ${reason}.` : ''}${refundNote}`,
+                type: 'Error',
+                related_type: 'Reservation',
+                related_id: reservation._id
+            });
+        }
+
+        const rejectedUser = reservation.user_id;
+        if (rejectedUser?.email) {
+            const refundEmailNote =
+                refundInfo.action === 'refunded'
+                    ? '<p>Your confirmed security deposit has been marked as <strong>refunded</strong> in the system.</p>'
+                    : refundInfo.action === 'cancelled_pending'
+                        ? '<p>Your pending security deposit payment request has been <strong>cancelled</strong> in the system.</p>'
+                        : '';
+
+            await sendEmail({
+                to: rejectedUser.email,
+                subject: 'Reservation Rejected – UTAS Borrowing Hub',
+                html: `<div style="${emailStyle}">${emailHeader}
+                  <div style="padding:24px;">
+                    <p>Dear ${rejectedUser.full_name},</p>
+                    <p>Unfortunately, your reservation request has been <strong style="color:#c62828;">rejected</strong>.</p>
+                    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                      <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${reservation.resource_id?.name || 'N/A'}</td></tr>
+                      <tr><td style="padding:6px;color:#555;">Pickup Date</td><td style="padding:6px;">${new Date(reservation.pickup_date).toLocaleDateString()}</td></tr>
+                      ${reason ? `<tr><td style="padding:6px;color:#555;">Reason</td><td style="padding:6px;">${reason}</td></tr>` : ''}
+                    </table>
+                    ${refundEmailNote}
+                  </div>${emailFooter}</div>`
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: reservation,
+            refundInfo,
+            message: 'Reservation rejected successfully'
+        });
+    } catch (error) {
+        console.error('Reject reservation error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to reject reservation'
+        });
+    }
+});
+
+// Cancel a borrower's return request (no inventory change — item still on loan)
+app.put("/admin/borrows/:id/cancel-pending-return", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const admin = await UserModel.findById(decoded.id);
+
+        if (!['Admin', 'Assistant'].includes(admin.role)) {
+            return res.status(403).json({ message: 'Not authorized' });
+        }
+
+        const borrow = await BorrowModel.findById(req.params.id).populate('resource_id').populate('user_id');
+        if (!borrow) {
+            return res.status(404).json({ success: false, message: 'Borrow not found' });
+        }
+
+        if (borrow.status !== 'PendingReturn') {
+            return res.status(400).json({
+                success: false,
+                message: `No pending return to cancel. Current status: ${borrow.status}`
+            });
+        }
+
+        const pastDue = borrow.due_date && new Date(borrow.due_date) < new Date();
+        const activeStatus = borrow.claimed_at ? 'Claimed' : 'Active';
+        borrow.status = pastDue ? 'Overdue' : activeStatus;
+        borrow.return_requested_at = null;
+        borrow.updated_at = new Date();
+        await borrow.save();
+
+        const uid = borrow.user_id?._id || borrow.user_id;
+        if (uid && (await shouldSendInAppNotification(uid, 'borrowApproval'))) {
+            await NotificationModel.create({
+                user_id: uid,
+                title: 'Return request cancelled',
+                message: `Your return request for "${borrow.resource_id?.name || 'the resource'}" was cancelled by staff. The item remains on your loan — please contact the hub if you have questions.`,
+                type: 'Warning',
+                related_type: 'Borrow',
+                related_id: borrow._id
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: borrow,
+            message: 'Pending return cancelled; borrow set back to active/overdue.'
+        });
+    } catch (error) {
+        console.error('Cancel pending return error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to cancel pending return'
         });
     }
 });
@@ -2876,16 +3656,23 @@ app.delete("/admin/borrows/:id", async (req, res) => {
             });
         }
 
-        // If borrow is Active, increase resource quantity
-        if (borrow.status === 'Active') {
+        // If borrow still held a copy (including user-submitted return not yet confirmed), restore inventory
+        if (BORROW_OUT_STATUSES.includes(borrow.status)) {
             const resource = await ResourceModel.findById(borrow.resource_id._id);
             if (resource) {
-                resource.available_quantity += 1;
+                resource.available_quantity = Math.min(
+                    resource.total_quantity || 1,
+                    resource.available_quantity + 1
+                );
                 if (resource.status === 'Borrowed' && resource.available_quantity > 0) {
                     resource.status = 'Available';
                 }
                 await resource.save();
             }
+        }
+
+        if (borrow.status === 'PendingApproval' && borrow.payment_id) {
+            await releaseLinkedDepositPayment(borrow.payment_id, admin._id, 'borrow record deleted by admin');
         }
 
         // Delete the borrow
@@ -2979,7 +3766,7 @@ app.get("/penalties/my-penalties", async (req, res) => {
         const { status } = req.query;
         const query = { user_id: decoded.id };
         
-        if (status) query.status = status;
+        if (status) query.status = status === 'Claimed' ? { $in: ['Claimed', 'Active'] } : status;
 
         const penalties = await PenaltyModel.find(query)
             .populate({
@@ -3251,12 +4038,18 @@ app.post("/payments", async (req, res) => {
         };
 
         // Add card details if payment method is Card
-        if (payment_method === 'Card' && card_details) {
+        if (payment_method === 'Card') {
+            const cardValidation = validateCardPayload(card_details);
+            if (!cardValidation.valid) {
+                return res.status(400).json({ message: cardValidation.message });
+            }
+
+            const normalizedCard = cardValidation.normalized;
             // Store only last 4 digits for security (don't store full card number)
-            const cardNumber = card_details.card_number || '';
+            const cardNumber = normalizedCard.card_number || '';
             paymentData.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
-            paymentData.card_holder = card_details.card_holder || '';
-            paymentData.card_expiry = card_details.expiry_date || '';
+            paymentData.card_holder = normalizedCard.card_holder || '';
+            paymentData.card_expiry = normalizedCard.expiry_date || '';
             // Never store CVV - it's only for transaction processing
         }
 
@@ -3299,6 +4092,7 @@ app.get("/payments/my-payments", async (req, res) => {
 
         const payments = await PaymentModel.find(query)
             .populate('penalty_id', 'fine_amount penalty_type description')
+            .populate('resource_id', 'name location')
             .sort({ created_at: -1 });
 
         res.json({ success: true, data: payments });
@@ -3391,6 +4185,28 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
             return res.status(400).json({ message: 'Payment is not pending' });
         }
 
+        const effectiveMethod = payment_method || payment.payment_method;
+        if (payment.payment_method && effectiveMethod && effectiveMethod !== payment.payment_method) {
+            return res.status(400).json({
+                message: 'Payment method must match what you selected when creating the borrow/reservation (Cash or Card).'
+            });
+        }
+        if (effectiveMethod === 'Card' && (!card_details || !card_details.card_number)) {
+            return res.status(400).json({ message: 'Card details are required when paying by card.' });
+        }
+        if (effectiveMethod === 'Cash' && card_details?.card_number) {
+            return res.status(400).json({ message: 'Do not send card details for cash payments.' });
+        }
+
+        let normalizedCard = null;
+        if (effectiveMethod === 'Card') {
+            const cardValidation = validateCardPayload(card_details);
+            if (!cardValidation.valid) {
+                return res.status(400).json({ message: cardValidation.message });
+            }
+            normalizedCard = cardValidation.normalized;
+        }
+
         // Update basic payment info
         if (payment_method) {
             payment.payment_method = payment_method;
@@ -3403,11 +4219,11 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
         }
 
         // Store limited card details if provided
-        if (card_details && card_details.card_number) {
-            const cardNumber = card_details.card_number || '';
+        if (normalizedCard?.card_number) {
+            const cardNumber = normalizedCard.card_number || '';
             payment.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
-            payment.card_holder = card_details.card_holder || '';
-            payment.card_expiry = card_details.expiry_date || '';
+            payment.card_holder = normalizedCard.card_holder || '';
+            payment.card_expiry = normalizedCard.expiry_date || '';
         }
 
         payment.status = 'Completed';
@@ -3424,17 +4240,110 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
             }
         }
 
-        // If this payment is for a resource borrow deposit, mark the borrow as deposit-paid
+        // If this payment is for a deposit, mark the related borrow/reservation as paid
+        let relatedBorrow = null;
+        let relatedReservation = null;
         if (payment.payment_type === 'Resource') {
-            const relatedBorrow = await BorrowModel.findOne({ payment_id: payment._id });
+            relatedBorrow = await BorrowModel.findOne({ payment_id: payment._id })
+                .populate('resource_id', 'name location')
+                .populate('user_id', 'full_name email');
             if (relatedBorrow) {
                 relatedBorrow.payment_status = 'Paid';
                 relatedBorrow.updated_at = Date.now();
                 await relatedBorrow.save();
             }
+        } else if (payment.payment_type === 'Reservation') {
+            relatedReservation = await ReservationModel.findOne({ payment_id: payment._id })
+                .populate('resource_id', 'name location')
+                .populate('user_id', 'full_name email');
+            if (relatedReservation) {
+                relatedReservation.payment_status = 'Paid';
+                relatedReservation.updated_at = Date.now();
+                await relatedReservation.save();
+            }
         }
 
         await payment.save();
+
+        if (payment.payment_type === 'Resource' && relatedBorrow) {
+            const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+            const resourceName = relatedBorrow.resource_id?.name || 'resource';
+            const borrowerName = relatedBorrow.user_id?.full_name || user.full_name;
+            const borrowerEmail = relatedBorrow.user_id?.email || user.email;
+            const pickupLocation = relatedBorrow.resource_id?.location || 'IT Borrowing Hub - Lab 2';
+
+            for (const admin of admins) {
+                if (await shouldSendInAppNotification(admin._id, 'borrowApproval')) {
+                    await NotificationModel.create({
+                        user_id: admin._id,
+                        title: 'Borrow Payment Completed',
+                        message: `${borrowerName} (${borrowerEmail}) completed the ${payment.payment_method} deposit payment for "${resourceName}". The borrow request is now ready for your review and approval.`,
+                        type: 'Info',
+                        related_type: 'Borrow',
+                        related_id: relatedBorrow._id
+                    });
+                }
+
+                if (admin.email) {
+                    await sendEmail({
+                        to: admin.email,
+                        subject: `Borrow payment completed – ${resourceName} – UTAS Borrowing Hub`,
+                        html: `<div style="${emailStyle}">${emailHeader}
+                          <div style="padding:24px;">
+                            <p>Dear ${admin.full_name},</p>
+                            <p>The deposit payment for a borrow request has been completed and is ready for approval.</p>
+                            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                              <tr><td style="padding:6px;color:#555;">User</td><td style="padding:6px;font-weight:bold;">${borrowerName} (${borrowerEmail})</td></tr>
+                              <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;">${resourceName}</td></tr>
+                              <tr><td style="padding:6px;color:#555;">Deposit</td><td style="padding:6px;">${payment.amount} OMR via ${payment.payment_method}</td></tr>
+                              <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${pickupLocation}</td></tr>
+                            </table>
+                            <p>Please review the borrow request in Borrow Management.</p>
+                          </div>${emailFooter}</div>`
+                    });
+                }
+            }
+        }
+
+        if (payment.payment_type === 'Reservation' && relatedReservation) {
+            const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+            const resourceName = relatedReservation.resource_id?.name || 'resource';
+            const reserverName = relatedReservation.user_id?.full_name || user.full_name;
+            const reserverEmail = relatedReservation.user_id?.email || user.email;
+            const pickupLocation = relatedReservation.resource_id?.location || 'IT Borrowing Hub - Lab 2';
+
+            for (const admin of admins) {
+                if (await shouldSendInAppNotification(admin._id, 'reservationConfirmation')) {
+                    await NotificationModel.create({
+                        user_id: admin._id,
+                        title: 'Reservation Payment Completed',
+                        message: `${reserverName} (${reserverEmail}) completed the ${payment.payment_method} deposit payment for reservation "${resourceName}". The reservation is now ready for your review and approval.`,
+                        type: 'Info',
+                        related_type: 'Reservation',
+                        related_id: relatedReservation._id
+                    });
+                }
+
+                if (admin.email) {
+                    await sendEmail({
+                        to: admin.email,
+                        subject: `Reservation payment completed – ${resourceName} – UTAS Borrowing Hub`,
+                        html: `<div style="${emailStyle}">${emailHeader}
+                          <div style="padding:24px;">
+                            <p>Dear ${admin.full_name},</p>
+                            <p>The deposit payment for a reservation has been completed and is ready for approval.</p>
+                            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                              <tr><td style="padding:6px;color:#555;">User</td><td style="padding:6px;font-weight:bold;">${reserverName} (${reserverEmail})</td></tr>
+                              <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;">${resourceName}</td></tr>
+                              <tr><td style="padding:6px;color:#555;">Deposit</td><td style="padding:6px;">${payment.amount} OMR via ${payment.payment_method}</td></tr>
+                              <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${pickupLocation}</td></tr>
+                            </table>
+                            <p>Please review the reservation in Reservations Management.</p>
+                          </div>${emailFooter}</div>`
+                    });
+                }
+            }
+        }
 
         await NotificationModel.create({
             user_id: user._id,
@@ -3508,13 +4417,20 @@ app.put("/admin/payments/:id/status", async (req, res) => {
                 });
             }
 
-            // If this is a resource security deposit, mark the related borrow deposit as paid
+            // If this is a security deposit, mark the related borrow/reservation deposit as paid
             if (payment.payment_type === 'Resource') {
                 const relatedBorrow = await BorrowModel.findOne({ payment_id: payment._id });
                 if (relatedBorrow) {
                     relatedBorrow.payment_status = 'Paid';
                     relatedBorrow.updated_at = Date.now();
                     await relatedBorrow.save();
+                }
+            } else if (payment.payment_type === 'Reservation') {
+                const relatedReservation = await ReservationModel.findOne({ payment_id: payment._id });
+                if (relatedReservation) {
+                    relatedReservation.payment_status = 'Paid';
+                    relatedReservation.updated_at = Date.now();
+                    await relatedReservation.save();
                 }
             }
         } else if (status === 'Failed' && oldStatus === 'Completed') {
@@ -3524,8 +4440,7 @@ app.put("/admin/payments/:id/status", async (req, res) => {
                 payment.penalty_id.paid_at = null;
                 await payment.penalty_id.save();
             }
-        } else if (status === 'Refunded') {
-            // Revert penalty status if refunded
+        } else if (status === 'Refunded' && oldStatus === 'Completed') {
             if (payment.penalty_id && payment.penalty_id.status === 'Paid') {
                 payment.penalty_id.status = 'Pending';
                 payment.penalty_id.paid_at = null;
@@ -3539,6 +4454,18 @@ app.put("/admin/payments/:id/status", async (req, res) => {
                     related_type: 'Payment',
                     related_id: payment._id
                 });
+            } else if (['Resource', 'Reservation'].includes(payment.payment_type)) {
+                const uid = payment.user_id;
+                if (uid && (await shouldSendInAppNotification(uid, payment.payment_type === 'Reservation' ? 'reservationConfirmation' : 'borrowApproval'))) {
+                    await NotificationModel.create({
+                        user_id: uid,
+                        title: 'Security deposit refunded',
+                        message: `Your security deposit of ${payment.amount} OMR has been marked as refunded in the system. Contact the hub if you have questions.`,
+                        type: 'Success',
+                        related_type: 'Payment',
+                        related_id: payment._id
+                    });
+                }
             }
         }
 
@@ -3571,10 +4498,10 @@ app.get("/admin/dashboard", async (req, res) => {
             return res.status(500).json({ message: "Not authorized" });
         }
 
-        const [totalUsers, totalResources, activeBorrows, pendingReservations, overdueBorrows, pendingPenalties, totalRevenue, recentBorrows, availableResources, maintenanceResources, returnedBorrows] = await Promise.all([
+        const [totalUsers, totalResources, activeBorrows, pendingReservations, overdueBorrows, pendingPenalties, totalRevenue, recentBorrows, availableResourcesAgg, maintenanceResources, returnedBorrows] = await Promise.all([
             UserModel.countDocuments(),
             ResourceModel.countDocuments(),
-            BorrowModel.countDocuments({ status: 'Active' }),
+            BorrowModel.countDocuments({ status: { $in: ['Claimed', 'Active'] } }),
             ReservationModel.countDocuments({ status: { $in: ['Pending', 'Confirmed'] } }),
             BorrowModel.countDocuments({ status: 'Overdue' }),
             PenaltyModel.countDocuments({ status: 'Pending' }),
@@ -3582,17 +4509,25 @@ app.get("/admin/dashboard", async (req, res) => {
                 { $match: { status: 'Completed' } },
                 { $group: { _id: null, total: { $sum: '$amount' } } }
             ]),
-            BorrowModel.find({ status: 'Active' })
+            BorrowModel.find({ status: { $in: ['Claimed', 'Active'] } })
                 .populate('user_id', 'full_name email')
                 .populate('resource_id', 'name category')
                 .sort({ borrow_date: -1 })
                 .limit(10),
-            ResourceModel.countDocuments({ status: 'Available' }),
+            ResourceModel.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: { $ifNull: ['$available_quantity', 0] } }
+                    }
+                }
+            ]),
             ResourceModel.countDocuments({ status: 'Maintenance' }),
             BorrowModel.countDocuments({ status: 'Returned' })
         ]);
 
         const revenue = totalRevenue.length > 0 ? totalRevenue[0].total : 0;
+        const availableResources = availableResourcesAgg.length > 0 ? availableResourcesAgg[0].total : 0;
 
         const resourcesByCategory = await ResourceModel.aggregate([
             { $group: { _id: '$category', count: { $sum: 1 } } }
@@ -3870,7 +4805,7 @@ app.get("/admin/borrows/overdue", async (req, res) => {
         }
 
         const borrows = await BorrowModel.find({
-            status: { $in: ['Active', 'Overdue'] },
+            status: { $in: ['Claimed', 'Active', 'Overdue', 'PendingReturn'] },
             due_date: { $lt: new Date() }
         })
             .populate('user_id', 'full_name email student_id phone')
@@ -3895,7 +4830,7 @@ async function runOverdueBorrowCheck() {
         const now = new Date();
 
         const borrows = await BorrowModel.find({
-            status: 'Active',
+            status: { $in: ['Claimed', 'Active'] },
             return_date: null,
             due_date: { $lt: now }
         }).select('_id user_id resource_id due_date status');
@@ -4235,7 +5170,7 @@ app.get("/resources/scan/:code", async (req, res) => {
         let activeBorrow = null;
         activeBorrow = await BorrowModel.findOne({
             resource_id: resource._id,
-            status: { $in: ['Active', 'Overdue'] }
+            status: { $in: BORROW_OUT_STATUSES }
         })
             .populate('user_id', 'full_name email student_id')
             .sort({ borrow_date: -1 })
@@ -4774,6 +5709,43 @@ app.get("/admin/announcements", async (req, res) => {
     }
 });
 
+app.post("/assistant/abi-chat", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id).select('full_name role department');
+
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
+        const message = String(req.body?.message || '').trim();
+        if (!message) {
+            return res.status(400).json({ success: false, message: 'Message is required' });
+        }
+
+        const reply = await getAbiReply({ message, user });
+
+        return res.json({
+            success: true,
+            data: {
+                name: 'Abi',
+                reply
+            }
+        });
+    } catch (error) {
+        console.error('Abi chat error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to get Abi response'
+        });
+    }
+});
+
 app.post("/admin/announcements", async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -4927,36 +5899,55 @@ app.get("/admin/reports/export", async (req, res) => {
 // ==================== HEALTH CHECK ====================
 
 app.get("/health", (req, res) => {
-    res.send({ status: 'OK', message: 'UTAS Borrowing Hub API is running' });
+    const dbStatuses = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+    const dbState = dbStatuses[mongoose.connection.readyState] || 'unknown';
+    res.send({
+        status: dbState === 'connected' ? 'OK' : 'DEGRADED',
+        message: 'UTAS Borrowing Hub API is running',
+        database: dbState
+    });
 });
 
 // ==================== START SERVER ====================
 
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(PORT, () => {
-    console.log(`Server started at ${PORT}..`);
-    // Run overdue check once on startup, then every hour
-    runOverdueBorrowCheck().catch((err) => {
-        console.error('Initial overdue borrow check failed:', err);
-    });
-    setInterval(() => {
-        runOverdueBorrowCheck().catch((err) => {
-            console.error('Scheduled overdue borrow check failed:', err);
+async function startServer() {
+    try {
+        await connectToMongoDB();
+
+        const server = app.listen(PORT, () => {
+            console.log(`Server started at ${PORT}..`);
+            // Run overdue check once on startup, then every hour
+            runOverdueBorrowCheck().catch((err) => {
+                console.error('Initial overdue borrow check failed:', err);
+            });
+            setInterval(() => {
+                runOverdueBorrowCheck().catch((err) => {
+                    console.error('Scheduled overdue borrow check failed:', err);
+                });
+            }, 60 * 60 * 1000);
+        }).on('error', (err) => {
+            if (err.code === 'EADDRINUSE') {
+                console.error(`\n❌ Error: Port ${PORT} is already in use.`);
+                console.error(`Please either:`);
+                console.error(`  1. Stop the process using port ${PORT}`);
+                console.error(`  2. Or set a different PORT in your .env file (e.g., PORT=5001)`);
+                console.error(`\nTo find the process using port ${PORT}, run:`);
+                console.error(`  Windows: netstat -ano | findstr :${PORT}`);
+                console.error(`  Linux/Mac: lsof -i :${PORT}\n`);
+                process.exit(1);
+            } else {
+                console.error('Server error:', err);
+                process.exit(1);
+            }
         });
-    }, 60 * 60 * 1000);
-}).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.error(`\n❌ Error: Port ${PORT} is already in use.`);
-        console.error(`Please either:`);
-        console.error(`  1. Stop the process using port ${PORT}`);
-        console.error(`  2. Or set a different PORT in your .env file (e.g., PORT=5001)`);
-        console.error(`\nTo find the process using port ${PORT}, run:`);
-        console.error(`  Windows: netstat -ano | findstr :${PORT}`);
-        console.error(`  Linux/Mac: lsof -i :${PORT}\n`);
-        process.exit(1);
-    } else {
-        console.error('Server error:', err);
+
+        return server;
+    } catch (error) {
+        console.error('MongoDB connection error:', error);
         process.exit(1);
     }
-});
+}
+
+startServer();

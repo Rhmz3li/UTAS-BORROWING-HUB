@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Alert, Spinner, Modal, ModalHeader, ModalBody, ModalFooter, FormGroup, Label, Input } from "reactstrap";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import axios from 'axios';
 import { FaCreditCard, FaCheckCircle, FaClock, FaTimesCircle, FaArrowLeft, FaReceipt, FaDollarSign } from 'react-icons/fa';
@@ -8,18 +8,21 @@ import { toast } from 'react-toastify';
 
 const Payments = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user } = useSelector((state) => state.auth);
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
     const [payModalOpen, setPayModalOpen] = useState(false);
     const [selectedPayment, setSelectedPayment] = useState(null);
+    const [pendingAutoOpenPaymentId, setPendingAutoOpenPaymentId] = useState(location.state?.openPaymentId || null);
     const [payData, setPayData] = useState({
         card_number: '',
         card_holder: '',
         expiry_date: '',
         cvv: '',
-        transaction_id: ''
+        transaction_id: '',
+        cash_notes: ''
     });
 
     useEffect(() => {
@@ -29,6 +32,17 @@ const Payments = () => {
         }
         fetchPayments();
     }, [user, navigate, filter]);
+
+    useEffect(() => {
+        if (!pendingAutoOpenPaymentId || loading || payments.length === 0) return;
+
+        const matchingPayment = payments.find((payment) => payment._id === pendingAutoOpenPaymentId);
+        if (!matchingPayment) return;
+
+        openPayModal(matchingPayment);
+        setPendingAutoOpenPaymentId(null);
+        navigate(location.pathname, { replace: true, state: {} });
+    }, [pendingAutoOpenPaymentId, loading, payments, navigate, location.pathname]);
 
     const fetchPayments = async () => {
         try {
@@ -59,57 +73,122 @@ const Payments = () => {
             card_holder: '',
             expiry_date: '',
             cvv: '',
-            transaction_id: ''
+            transaction_id: '',
+            cash_notes: ''
         });
         setPayModalOpen(true);
     };
 
+    const passesLuhnCheck = (cardNumber) => {
+        const digits = String(cardNumber || '').replace(/\D/g, '');
+        if (digits.length < 13 || digits.length > 19) return false;
+
+        let sum = 0;
+        let shouldDouble = false;
+        for (let i = digits.length - 1; i >= 0; i -= 1) {
+            let digit = parseInt(digits.charAt(i), 10);
+            if (Number.isNaN(digit)) return false;
+            if (shouldDouble) {
+                digit *= 2;
+                if (digit > 9) digit -= 9;
+            }
+            sum += digit;
+            shouldDouble = !shouldDouble;
+        }
+
+        return sum % 10 === 0;
+    };
+
+    const detectCardType = (cardNumber) => {
+        const digits = String(cardNumber || '').replace(/\D/g, '');
+        if (!digits) return null;
+
+        if (/^4/.test(digits)) {
+            return { label: 'Visa', color: '#1a1f71', bg: '#e8edff' };
+        }
+
+        if (/^(5[1-5]|2(2[2-9]|[3-6]\d|7[01]|720))/.test(digits)) {
+            return { label: 'MasterCard', color: '#c62828', bg: '#ffebee' };
+        }
+
+        if (/^3[47]/.test(digits)) {
+            return { label: 'American Express', color: '#006fcf', bg: '#e3f2fd' };
+        }
+
+        if (/^(6011|65|64[4-9])/.test(digits)) {
+            return { label: 'Discover', color: '#ef6c00', bg: '#fff3e0' };
+        }
+
+        return { label: 'Card type not recognized yet', color: '#666', bg: '#f5f5f5' };
+    };
+
+    const cardType = detectCardType(payData.card_number);
+
     const handleConfirmPayDeposit = async () => {
         if (!selectedPayment) return;
 
-        // Basic client-side validation for card data
-        const digitsOnly = payData.card_number.replace(/\s/g, '');
-        if (!digitsOnly || digitsOnly.length < 13 || digitsOnly.length > 16) {
-            toast.error('Please enter a valid card number (13–16 digits)');
+        const method = selectedPayment.payment_method;
+        const token = localStorage.getItem('token');
+        const url = `http://localhost:5000/payments/${selectedPayment._id}/pay-deposit`;
+
+        if (method === 'Cash') {
+            try {
+                await axios.post(
+                    url,
+                    {
+                        payment_method: 'Cash',
+                        transaction_id: payData.transaction_id?.trim() || undefined,
+                        notes: payData.cash_notes?.trim() || selectedPayment.notes || 'Cash deposit at hub'
+                    },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                toast.success('Cash payment recorded');
+                setPayModalOpen(false);
+                setSelectedPayment(null);
+                fetchPayments();
+            } catch (error) {
+                console.error('Pay deposit error:', error);
+                toast.error(error.response?.data?.message || 'Failed to complete payment');
+            }
             return;
         }
-        if (!payData.card_holder || payData.card_holder.trim().length < 2) {
-            toast.error('Please enter card holder name');
+
+        // Card: validate and send card details only
+        const digitsOnly = payData.card_number.replace(/\s/g, '');
+        if (!passesLuhnCheck(digitsOnly)) {
+            toast.error('Please enter a valid card number');
+            return;
+        }
+        if (!/^[A-Za-z][A-Za-z\s.'-]{1,}$/.test(payData.card_holder.trim())) {
+            toast.error('Please enter the card holder name as shown on the card');
             return;
         }
         if (!/^\d{2}\/\d{2}$/.test(payData.expiry_date || '')) {
             toast.error('Please enter a valid expiry date (MM/YY)');
             return;
-        } else {
-            // Check that expiry date is not in the past
-            const [mmStr, yyStr] = payData.expiry_date.split('/');
-            const month = parseInt(mmStr, 10);
-            const year = parseInt(yyStr, 10);
-
-            // Basic month range check
-            if (isNaN(month) || isNaN(year) || month < 1 || month > 12) {
-                toast.error('Please enter a valid expiry month (01–12)');
-                return;
-            }
-
-            const now = new Date();
-            const currentYear = now.getFullYear() % 100; // last two digits
-            const currentMonth = now.getMonth() + 1; // 1-12
-
-            if (year < currentYear || (year === currentYear && month < currentMonth)) {
-                toast.error('Card expiry date cannot be in the past');
-                return;
-            }
         }
-        if (!payData.cvv || payData.cvv.length < 3) {
-            toast.error('Please enter a valid CVV');
+        const [mmStr, yyStr] = payData.expiry_date.split('/');
+        const month = parseInt(mmStr, 10);
+        const year = parseInt(yyStr, 10);
+        if (isNaN(month) || isNaN(year) || month < 1 || month > 12) {
+            toast.error('Please enter a valid expiry month (01–12)');
+            return;
+        }
+        const now = new Date();
+        const currentYear = now.getFullYear() % 100;
+        const currentMonth = now.getMonth() + 1;
+        if (year < currentYear || (year === currentYear && month < currentMonth)) {
+            toast.error('Card expiry date cannot be in the past');
+            return;
+        }
+        if (!/^\d{3,4}$/.test(payData.cvv || '')) {
+            toast.error('Please enter a valid 3 or 4 digit CVV');
             return;
         }
 
         try {
-            const token = localStorage.getItem('token');
             await axios.post(
-                `http://localhost:5000/payments/${selectedPayment._id}/pay-deposit`,
+                url,
                 {
                     payment_method: 'Card',
                     transaction_id: payData.transaction_id || undefined,
@@ -121,18 +200,17 @@ const Payments = () => {
                         cvv: payData.cvv
                     }
                 },
-                {
-                    headers: { Authorization: `Bearer ${token}` }
-                }
+                { headers: { Authorization: `Bearer ${token}` } }
             );
-            toast.success('Payment completed successfully!');
+            toast.success(
+                `Payment completed successfully. Admin has been notified to review your ${selectedPayment.payment_type === 'Reservation' ? 'reservation request' : 'borrow request'}.`
+            );
             setPayModalOpen(false);
             setSelectedPayment(null);
             fetchPayments();
         } catch (error) {
             console.error('Pay deposit error:', error);
-            const msg = error.response?.data?.message || 'Failed to complete payment';
-            toast.error(msg);
+            toast.error(error.response?.data?.message || 'Failed to complete payment');
         }
     };
 
@@ -194,6 +272,10 @@ const Payments = () => {
     const pendingAmount = payments
         .filter(p => p.status === 'Pending')
         .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    const pendingRequiredPayments = payments.filter(
+        (p) => p.status === 'Pending' && ['Resource', 'Reservation'].includes(p.payment_type)
+    );
 
     return (
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
@@ -334,6 +416,13 @@ const Payments = () => {
                     <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: '#2c3e50' }}>
                         Payment History
                     </CardTitle>
+
+                    {pendingRequiredPayments.length > 0 && (
+                        <Alert color="warning" style={{ borderRadius: '12px', marginBottom: '1.25rem' }}>
+                            <strong>Action required:</strong> You have {pendingRequiredPayments.length} pending required payment(s).
+                            Please complete them to allow final admin approval.
+                        </Alert>
+                    )}
                     
                     {loading ? (
                         <div className="text-center py-5">
@@ -402,14 +491,14 @@ const Payments = () => {
                                                 </span>
                                             </td>
                                             <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                                                {payment.payment_type === 'Resource' && payment.status === 'Pending' ? (
+                                                {['Resource', 'Reservation'].includes(payment.payment_type) && payment.status === 'Pending' ? (
                                                     <Button
                                                         color="primary"
                                                         size="sm"
                                                         onClick={() => openPayModal(payment)}
                                                         style={{ fontWeight: '600', borderRadius: '8px' }}
                                                     >
-                                                        Pay Deposit
+                                                        Pay Now
                                                     </Button>
                                                 ) : (
                                                     <span style={{ color: '#999', fontSize: '0.85rem' }}>-</span>
@@ -437,79 +526,142 @@ const Payments = () => {
                                 <strong>Amount:</strong> {selectedPayment.amount?.toFixed(2) || '0.00'} OMR
                                 <br />
                                 <strong>For:</strong> {selectedPayment.notes || 'Security deposit'}
+                                <br />
+                                <strong>Method:</strong>{' '}
+                                {getPaymentMethodBadge(selectedPayment.payment_method || '—')}
                             </Alert>
-                            <FormGroup>
-                                <Label>Card Number *</Label>
-                                <Input
-                                    type="text"
-                                    maxLength="19"
-                                    value={payData.card_number}
-                                    onChange={(e) => {
-                                        const val = e.target.value.replace(/\s/g, '');
-                                        if (/^\d*$/.test(val) && val.length <= 16) {
-                                            // format as XXXX XXXX ...
-                                            const parts = val.match(/\d{1,4}/g) || [];
-                                            setPayData({ ...payData, card_number: parts.join(' ') });
-                                        }
-                                    }}
-                                    placeholder="1234 5678 9012 3456"
-                                />
-                            </FormGroup>
-                            <Row>
-                                <Col md={6}>
+                            {selectedPayment.payment_method === 'Cash' ? (
+                                <>
+                                    <Alert color="success" className="mb-3">
+                                        <strong>Cash Payment</strong>
+                                        <p className="mb-1 mt-2" style={{ fontSize: '0.95rem' }}>
+                                            Pay the security deposit in person at the hub. After staff records it, confirm here so your request can proceed.
+                                        </p>
+                                        <p className="mb-0" style={{ fontSize: '0.95rem' }}>
+                                            Pay the deposit in person at the hub, then confirm it here so your request can continue.
+                                        </p>
+                                        {(selectedPayment.resource_id?.location || selectedPayment.resource_id?.name) && (
+                                            <p className="mt-2 mb-0">
+                                                <strong>Location:</strong>{' '}
+                                                {selectedPayment.resource_id?.location ||
+                                                    selectedPayment.resource_id?.name ||
+                                                    'IT Borrowing Hub'}
+                                            </p>
+                                        )}
+                                    </Alert>
                                     <FormGroup>
-                                        <Label>Card Holder *</Label>
+                                        <Label>Receipt / reference (optional)</Label>
                                         <Input
                                             type="text"
-                                            value={payData.card_holder}
-                                            onChange={(e) => setPayData({ ...payData, card_holder: e.target.value })}
-                                            placeholder="Name on card"
+                                            value={payData.transaction_id}
+                                            onChange={(e) => setPayData({ ...payData, transaction_id: e.target.value })}
+                                            placeholder="Receipt number or staff reference"
                                         />
                                     </FormGroup>
-                                </Col>
-                                <Col md={3}>
                                     <FormGroup>
-                                        <Label>Expiry (MM/YY) *</Label>
+                                        <Label>Notes (optional)</Label>
                                         <Input
                                             type="text"
-                                            maxLength="5"
-                                            value={payData.expiry_date}
+                                            value={payData.cash_notes}
+                                            onChange={(e) => setPayData({ ...payData, cash_notes: e.target.value })}
+                                            placeholder="Any note for staff"
+                                        />
+                                    </FormGroup>
+                                </>
+                            ) : (
+                                <>
+                                    <FormGroup>
+                                        <Label>Card Number *</Label>
+                                        <Input
+                                            type="text"
+                                            maxLength="19"
+                                            value={payData.card_number}
                                             onChange={(e) => {
-                                                let v = e.target.value.replace(/\D/g, '');
-                                                if (v.length >= 2) {
-                                                    v = v.substring(0, 2) + '/' + v.substring(2, 4);
+                                                const val = e.target.value.replace(/\s/g, '');
+                                                if (/^\d*$/.test(val) && val.length <= 16) {
+                                                    const parts = val.match(/\d{1,4}/g) || [];
+                                                    setPayData({ ...payData, card_number: parts.join(' ') });
                                                 }
-                                                setPayData({ ...payData, expiry_date: v });
                                             }}
-                                            placeholder="MM/YY"
+                                            placeholder="1234 5678 9012 3456"
                                         />
+                                        {cardType && (
+                                            <div
+                                                style={{
+                                                    marginTop: '0.5rem',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.35rem',
+                                                    padding: '0.3rem 0.65rem',
+                                                    borderRadius: '999px',
+                                                    background: cardType.bg,
+                                                    color: cardType.color,
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600'
+                                                }}
+                                            >
+                                                <FaCreditCard style={{ fontSize: '0.75rem' }} />
+                                                {cardType.label}
+                                            </div>
+                                        )}
                                     </FormGroup>
-                                </Col>
-                                <Col md={3}>
+                                    <Row>
+                                        <Col md={6}>
+                                            <FormGroup>
+                                                <Label>Card Holder *</Label>
+                                                <Input
+                                                    type="text"
+                                                    value={payData.card_holder}
+                                                    onChange={(e) => setPayData({ ...payData, card_holder: e.target.value })}
+                                                    placeholder="Name on card"
+                                                />
+                                            </FormGroup>
+                                        </Col>
+                                        <Col md={3}>
+                                            <FormGroup>
+                                                <Label>Expiry (MM/YY) *</Label>
+                                                <Input
+                                                    type="text"
+                                                    maxLength="5"
+                                                    value={payData.expiry_date}
+                                                    onChange={(e) => {
+                                                        let v = e.target.value.replace(/\D/g, '');
+                                                        if (v.length >= 2) {
+                                                            v = v.substring(0, 2) + '/' + v.substring(2, 4);
+                                                        }
+                                                        setPayData({ ...payData, expiry_date: v });
+                                                    }}
+                                                    placeholder="MM/YY"
+                                                />
+                                            </FormGroup>
+                                        </Col>
+                                        <Col md={3}>
+                                            <FormGroup>
+                                                <Label>CVV *</Label>
+                                                <Input
+                                                    type="password"
+                                                    maxLength="4"
+                                                    value={payData.cvv}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value.replace(/\D/g, '').substring(0, 4);
+                                                        setPayData({ ...payData, cvv: v });
+                                                    }}
+                                                    placeholder="123"
+                                                />
+                                            </FormGroup>
+                                        </Col>
+                                    </Row>
                                     <FormGroup>
-                                        <Label>CVV *</Label>
+                                        <Label>Transaction ID (optional)</Label>
                                         <Input
-                                            type="password"
-                                            maxLength="4"
-                                            value={payData.cvv}
-                                            onChange={(e) => {
-                                                const v = e.target.value.replace(/\D/g, '').substring(0, 4);
-                                                setPayData({ ...payData, cvv: v });
-                                            }}
-                                            placeholder="123"
+                                            type="text"
+                                            value={payData.transaction_id}
+                                            onChange={(e) => setPayData({ ...payData, transaction_id: e.target.value })}
+                                            placeholder="Reference from bank / gateway"
                                         />
                                     </FormGroup>
-                                </Col>
-                            </Row>
-                            <FormGroup>
-                                <Label>Transaction ID (optional)</Label>
-                                <Input
-                                    type="text"
-                                    value={payData.transaction_id}
-                                    onChange={(e) => setPayData({ ...payData, transaction_id: e.target.value })}
-                                    placeholder="Reference from bank / gateway"
-                                />
-                            </FormGroup>
+                                </>
+                            )}
                         </>
                     )}
                 </ModalBody>
@@ -518,7 +670,9 @@ const Payments = () => {
                         Cancel
                     </Button>
                     <Button color="primary" onClick={handleConfirmPayDeposit}>
-                        Pay Now
+                        {selectedPayment?.payment_method === 'Cash'
+                            ? 'Confirm Cash Payment'
+                            : 'Pay Now'}
                     </Button>
                 </ModalFooter>
             </Modal>

@@ -20,6 +20,7 @@ const AdminReservations = () => {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     fetchReservations();
@@ -68,6 +69,7 @@ const AdminReservations = () => {
 
   const handleCancel = (reservation) => {
     setSelectedReservation(reservation);
+    setRejectReason('');
     setCancelModalOpen(true);
   };
 
@@ -83,7 +85,7 @@ const AdminReservations = () => {
       );
 
       if (response.data.success) {
-        toast.success('Reservation approved and converted to borrow successfully!');
+        toast.success('Reservation approved and converted to an active borrow successfully!');
         fetchReservations();
       }
     } catch (error) {
@@ -116,6 +118,15 @@ const AdminReservations = () => {
 
   const confirmReservation = async () => {
     try {
+      if (
+        selectedReservation?.requires_payment &&
+        (selectedReservation.payment_amount || 0) > 0 &&
+        selectedReservation.payment_status !== 'Paid'
+      ) {
+        toast.error('Cannot confirm reservation. Security deposit has not been confirmed yet.');
+        return;
+      }
+
       const token = localStorage.getItem('token');
       await axios.put(
         `http://localhost:5000/admin/reservations/${selectedReservation._id}/confirm`,
@@ -137,20 +148,30 @@ const AdminReservations = () => {
   const cancelReservation = async () => {
     try {
       const token = localStorage.getItem('token');
-      await axios.put(
-        `http://localhost:5000/reservations/${selectedReservation._id}/cancel`,
-        {},
+      const response = await axios.put(
+        `http://localhost:5000/admin/reservations/${selectedReservation._id}/reject`,
+        { reason: rejectReason },
         {
           headers: { Authorization: `Bearer ${token}` }
         }
       );
-      toast.success('Reservation cancelled successfully');
+
+      const refundAction = response.data.refundInfo?.action;
+      const refundMessage =
+        refundAction === 'refunded'
+          ? ' Payment refunded automatically.'
+          : refundAction === 'cancelled_pending'
+            ? ' Pending payment cancelled automatically.'
+            : '';
+
+      toast.success(`Reservation rejected successfully.${refundMessage}`);
       setCancelModalOpen(false);
       setSelectedReservation(null);
+      setRejectReason('');
       fetchReservations();
     } catch (error) {
-      console.error('Cancel error:', error);
-      toast.error(error.response?.data?.message || 'Failed to cancel reservation');
+      console.error('Reject reservation error:', error);
+      toast.error(error.response?.data?.message || 'Failed to reject reservation');
     }
   };
 
@@ -186,6 +207,30 @@ const AdminReservations = () => {
     );
   };
 
+  const getPaymentBadge = (reservation) => {
+    if (!reservation?.requires_payment || (reservation.payment_amount || 0) <= 0) {
+      return (
+        <Badge style={{ background: '#e8f5e9', color: '#2e7d32', padding: '0.25rem 0.75rem', borderRadius: '12px', fontSize: '0.85rem', fontWeight: '600' }}>
+          No Deposit
+        </Badge>
+      );
+    }
+
+    const isPaid = reservation.payment_status === 'Paid';
+    return (
+      <Badge style={{
+        background: isPaid ? '#e8f5e9' : '#fff3e0',
+        color: isPaid ? '#2e7d32' : '#ff9800',
+        padding: '0.25rem 0.75rem',
+        borderRadius: '12px',
+        fontSize: '0.85rem',
+        fontWeight: '600'
+      }}>
+        {isPaid ? 'Deposit Paid' : 'Deposit Pending'}
+      </Badge>
+    );
+  };
+
   const isExpired = (expiryDate) => {
     return new Date(expiryDate) < new Date();
   };
@@ -200,7 +245,7 @@ const AdminReservations = () => {
               Reservations Management
             </h2>
             <p style={{ color: '#666', margin: 0 }}>
-              Manage all reservations: view details, confirm, and cancel reservations
+              Manage all reservations: review payment status, approve reservations, and convert confirmed reservations to borrows
             </p>
           </div>
         </Col>
@@ -279,6 +324,7 @@ const AdminReservations = () => {
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Pickup Date</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Expiry Date</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Payment</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600', textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
@@ -336,6 +382,9 @@ const AdminReservations = () => {
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                           {getStatusBadge(reservation.status, reservation.expiry_date)}
                         </td>
+                        <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
+                          {getPaymentBadge(reservation)}
+                        </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                             <Button
@@ -350,19 +399,25 @@ const AdminReservations = () => {
                               <>
                                 <Button
                                   size="sm"
-                                  onClick={() => handleConfirm(reservation)}
+                                  onClick={() => {
+                                    if (reservation.requires_payment && (reservation.payment_amount || 0) > 0 && reservation.payment_status !== 'Paid') {
+                                      toast.error('Cannot approve reservation. Security deposit has not been confirmed yet.');
+                                      return;
+                                    }
+                                    handleConfirm(reservation);
+                                  }}
                                   style={{ background: '#4caf50', border: 'none' }}
-                                  title="Confirm Reservation"
+                                  title="Approve Reservation"
                                 >
-                                  <FaCheckCircle /> Confirm
+                                  <FaCheckCircle /> Approve
                                 </Button>
                                 <Button
                                   size="sm"
                                   onClick={() => handleCancel(reservation)}
                                   style={{ background: '#f44336', border: 'none' }}
-                                  title="Cancel Reservation"
+                                  title="Reject Reservation"
                                 >
-                                  <FaTimes /> Cancel
+                                  <FaTimes /> Reject
                                 </Button>
                               </>
                             )}
@@ -464,6 +519,7 @@ const AdminReservations = () => {
                   </Col>
                   <Col md={6}>
                     <p><strong>Expiry Date:</strong> {new Date(selectedReservation.expiry_date).toLocaleString()}</p>
+                    <p><strong>Payment:</strong> {getPaymentBadge(selectedReservation)}</p>
                     {selectedReservation.notes && (
                       <p><strong>Notes:</strong> {selectedReservation.notes}</p>
                     )}
@@ -487,11 +543,15 @@ const AdminReservations = () => {
               <Button 
                 color="success" 
                 onClick={() => {
+                  if (selectedReservation.requires_payment && (selectedReservation.payment_amount || 0) > 0 && selectedReservation.payment_status !== 'Paid') {
+                    toast.error('Cannot approve reservation. Security deposit has not been confirmed yet.');
+                    return;
+                  }
                   setViewModalOpen(false);
                   handleConfirm(selectedReservation);
                 }}
               >
-                <FaCheckCircle /> Confirm
+                <FaCheckCircle /> Approve
               </Button>
               <Button 
                 color="danger" 
@@ -500,7 +560,7 @@ const AdminReservations = () => {
                   handleCancel(selectedReservation);
                 }}
               >
-                <FaTimes /> Cancel
+                <FaTimes /> Reject
               </Button>
             </>
           )}
@@ -521,16 +581,22 @@ const AdminReservations = () => {
       {/* Confirm Reservation Modal */}
       <Modal isOpen={confirmModalOpen} toggle={() => setConfirmModalOpen(false)}>
         <ModalHeader toggle={() => setConfirmModalOpen(false)}>
-          Confirm Reservation
+          Approve Reservation
         </ModalHeader>
         <ModalBody>
           {selectedReservation && (
             <Alert color="info">
-              Are you sure you want to confirm this reservation?
+              Are you sure you want to approve this reservation?
               <br />
               <strong>User:</strong> {selectedReservation.user_id?.full_name}
               <br />
               <strong>Resource:</strong> {selectedReservation.resource_id?.name}
+              {selectedReservation.requires_payment && (selectedReservation.payment_amount || 0) > 0 && (
+                <>
+                  <br />
+                  <strong>Deposit:</strong> {selectedReservation.payment_status === 'Paid' ? 'Paid' : 'Pending'}
+                </>
+              )}
               <br />
               <strong>Pickup Date:</strong> {new Date(selectedReservation.pickup_date).toLocaleDateString()}
             </Alert>
@@ -545,7 +611,7 @@ const AdminReservations = () => {
             onClick={confirmReservation}
             style={{ background: 'linear-gradient(135deg, #4caf50 0%, #45a049 100%)', border: 'none' }}
           >
-            <FaCheckCircle /> Confirm
+            <FaCheckCircle /> Approve
           </Button>
         </ModalFooter>
       </Modal>
@@ -553,20 +619,27 @@ const AdminReservations = () => {
       {/* Cancel Reservation Modal */}
       <Modal isOpen={cancelModalOpen} toggle={() => setCancelModalOpen(false)}>
         <ModalHeader toggle={() => setCancelModalOpen(false)}>
-          Cancel Reservation
+          Reject Reservation
         </ModalHeader>
         <ModalBody>
           {selectedReservation && (
             <Alert color="warning">
-              Are you sure you want to cancel this reservation?
+              Are you sure you want to reject this reservation?
               <br />
               <strong>User:</strong> {selectedReservation.user_id?.full_name}
               <br />
               <strong>Resource:</strong> {selectedReservation.resource_id?.name}
               <br />
-              This action cannot be undone.
+              Any linked payment will be automatically released or refunded.
             </Alert>
           )}
+          <Input
+            type="textarea"
+            rows="3"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Optional rejection reason..."
+          />
         </ModalBody>
         <ModalFooter>
           <Button color="secondary" onClick={() => setCancelModalOpen(false)}>
@@ -577,7 +650,7 @@ const AdminReservations = () => {
             onClick={cancelReservation}
             style={{ background: 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)', border: 'none' }}
           >
-            <FaTimes /> Yes, Cancel
+            <FaTimes /> Yes, Reject
           </Button>
         </ModalFooter>
       </Modal>

@@ -63,6 +63,16 @@ code {
     monospace;
 }
 
+/* Remove Bootstrap badge fill globally and keep only the text */
+.badge,
+.badge[class*="bg-"] {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

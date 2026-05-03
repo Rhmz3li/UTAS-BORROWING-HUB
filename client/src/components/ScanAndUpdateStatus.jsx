@@ -19,6 +19,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
   const [returnModal, setReturnModal] = useState(false);
   const [conditionOnReturn, setConditionOnReturn] = useState('Good');
   const [loading, setLoading] = useState(false);
+  const canFinalizeBorrow = activeBorrow && ['Claimed', 'Active', 'Overdue', 'PendingReturn'].includes(activeBorrow.status);
   const navigate = useNavigate();
 
   const stopScanner = async () => {
@@ -219,16 +220,24 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
                         <strong>Borrowed by:</strong> {activeBorrow.user_id?.full_name || activeBorrow.user_id?.email}
                       </p>
                       <p className="mb-0 small">
+                        <strong>Borrow status:</strong> {activeBorrow.status}
+                      </p>
+                      <p className="mb-0 small">
                         <strong>Due date:</strong>{' '}
                         {activeBorrow.due_date ? new Date(activeBorrow.due_date).toLocaleDateString() : '-'}
                       </p>
+                      {activeBorrow.status === 'Approved' && (
+                        <p className="mb-0 small text-primary">
+                          This item is approved for pickup but has not been physically claimed yet.
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardBody>
               </Card>
 
               <div className="d-flex flex-wrap gap-2">
-                {activeBorrow && (
+                {canFinalizeBorrow && (
                   <>
                     <Button color="success" onClick={() => setReturnModal(true)} disabled={loading}>Confirm Return</Button>
                     <Button color="danger" outline onClick={handleLost} disabled={loading}>Mark Lost</Button>

@@ -600,8 +600,6 @@ const Penalties = () => {
                                     >
                                         <option value="Cash">Cash</option>
                                         <option value="Card">Card</option>
-                                        <option value="Online">Online Payment</option>
-                                        <option value="Bank Transfer">Bank Transfer</option>
                                     </Input>
                                 </FormGroup>
                                 
