@@ -2314,12 +2314,20 @@ app.post("/reservations", async (req, res) => {
             });
         }
 
+<<<<<<< HEAD
         // Only block reservations for non-circulating states.
         // For Borrowed/Reserved states, availability is evaluated against the requested date range below.
         if (['Maintenance', 'Lost'].includes(resource.status)) {
             return res.status(400).json({
                 success: false,
                 message: "Resource is not available for reservation"
+=======
+        // Check if resource is available
+        if (resource.status !== 'Available' || resource.available_quantity < 1) {
+            return res.status(400).json({ 
+                success: false,
+                message: "Resource is not available for reservation" 
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             });
         }
 
@@ -2331,13 +2339,55 @@ app.post("/reservations", async (req, res) => {
             });
         }
 
+<<<<<<< HEAD
         // Calculate reservation period first (default expiry = pickup + 7 days)
+=======
+        // Check if resource is already borrowed during the requested pickup date
+        const pickupDate = new Date(pickup_date);
+        const expiryDate = expiry_date ? new Date(expiry_date) : new Date(pickupDate);
+        expiryDate.setDate(expiryDate.getDate() + (resource.max_borrow_days || 7));
+
+        // Check for active borrows that overlap with the requested dates
+        const overlappingBorrows = await BorrowModel.find({
+            resource_id: resource._id,
+            status: { $in: ['Claimed', 'Active', 'Overdue', 'PendingReturn'] },
+            $or: [
+                {
+                    borrow_date: { $lte: expiryDate },
+                    due_date: { $gte: pickupDate }
+                }
+            ]
+        });
+
+        if (overlappingBorrows.length >= resource.available_quantity) {
+            // Find the earliest return date
+            const earliestReturn = await BorrowModel.findOne({
+                resource_id: resource._id,
+                status: { $in: BORROW_OUT_STATUSES }
+            }).sort({ due_date: 1 });
+
+            const suggestedDate = earliestReturn 
+                ? new Date(earliestReturn.due_date)
+                : new Date();
+            suggestedDate.setDate(suggestedDate.getDate() + 1);
+
+            return res.status(400).json({ 
+                success: false,
+                message: `Resource is already borrowed during the requested period. Suggested available date: ${suggestedDate.toLocaleDateString()}`,
+                suggestedDate: suggestedDate.toISOString().split('T')[0],
+                earliestReturnDate: earliestReturn ? earliestReturn.due_date : null
+            });
+        }
+
+        // Calculate expiry date if not provided (default: pickup_date + 7 days)
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
         const pickupDateObj = new Date(pickup_date);
         let expiryDateObj;
         if (expiry_date) {
             expiryDateObj = new Date(expiry_date);
         } else {
             expiryDateObj = new Date(pickupDateObj);
+<<<<<<< HEAD
             expiryDateObj.setDate(expiryDateObj.getDate() + 7);
         }
         if (Number.isNaN(pickupDateObj.getTime()) || Number.isNaN(expiryDateObj.getTime())) {
@@ -2404,6 +2454,9 @@ app.post("/reservations", async (req, res) => {
                 suggestedDate: suggestedDate.toISOString().split('T')[0],
                 earliestReturnDate: earliestReturn ? earliestReturn.due_date : null
             });
+=======
+            expiryDateObj.setDate(expiryDateObj.getDate() + 7); // Default 7 days expiry
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
         }
 
         // Check if user has accepted terms and conditions

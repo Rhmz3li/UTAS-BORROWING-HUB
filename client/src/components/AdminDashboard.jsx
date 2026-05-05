@@ -10,12 +10,16 @@ import {
 } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+<<<<<<< HEAD
 import { useTheme } from '../contexts/ThemeContext.jsx';
+=======
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
 
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.auth);
+<<<<<<< HEAD
   const { isDark } = useTheme();
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,6 +42,11 @@ const AdminDashboard = () => {
         hoverShadow: '0 8px 16px rgba(0,0,0,0.15)'
       };
 
+=======
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
   useEffect(() => {
     // Check if user is Admin or Assistant
     if (!user) {
@@ -74,7 +83,11 @@ const AdminDashboard = () => {
 
   if (loading) {
     return (
+<<<<<<< HEAD
       <Container fluid className="py-5" style={{ background: dashboardPalette.pageBg, minHeight: '100vh' }}>
+=======
+      <Container fluid className="py-5" style={{ background: '#f5f5f5', minHeight: '100vh' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
         <div className="text-center">
           <div className="spinner-border text-primary" role="status">
             <span className="visually-hidden">Loading...</span>
@@ -174,7 +187,11 @@ const AdminDashboard = () => {
       marginLeft: '280px',
       padding: '2rem', 
       minHeight: '100vh', 
+<<<<<<< HEAD
       background: dashboardPalette.pageBg
+=======
+      background: '#f5f5f5'
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
     }}>
       <Container fluid>
         {/* Header */}
@@ -184,6 +201,7 @@ const AdminDashboard = () => {
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center',
+<<<<<<< HEAD
             background: dashboardPalette.cardBg,
             padding: '1.5rem',
             borderRadius: '12px',
@@ -197,6 +215,21 @@ const AdminDashboard = () => {
                 Welcome to the UTAS Borrowing Hub Management System
               </p>
               <p style={{ color: dashboardPalette.textSecondary, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+=======
+            background: 'white',
+            padding: '1.5rem',
+            borderRadius: '12px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          }}>
+            <div>
+              <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                Control Panel
+              </h2>
+              <p style={{ color: '#666', margin: 0, fontSize: '0.95rem' }}>
+                Welcome to the UTAS Borrowing Hub Management System
+              </p>
+              <p style={{ color: '#999', margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 University of Technology and Applied Sciences
               </p>
             </div>
@@ -216,25 +249,41 @@ const AdminDashboard = () => {
                   borderRadius: '12px', 
                   cursor: 'pointer', 
                   transition: 'all 0.3s ease',
+<<<<<<< HEAD
                   borderLeft: `4px solid ${stat.color}`,
                   backgroundColor: dashboardPalette.cardBg,
                   boxShadow: dashboardPalette.cardShadow
+=======
+                  borderLeft: `4px solid ${stat.color}`
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 }}
                 onClick={() => navigate(stat.path)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
+<<<<<<< HEAD
                   e.currentTarget.style.boxShadow = dashboardPalette.hoverShadow;
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = dashboardPalette.cardShadow;
+=======
+                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 }}
               >
                 <CardBody className="p-4">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ 
+<<<<<<< HEAD
                         color: dashboardPalette.textSecondary, 
+=======
+                        color: '#666', 
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         fontSize: '0.875rem', 
                         margin: 0, 
                         marginBottom: '0.5rem',
@@ -275,16 +324,28 @@ const AdminDashboard = () => {
       <Row className="g-3 mb-4">
         {/* Bar Chart - Borrow Status */}
         <Col md={6}>
+<<<<<<< HEAD
           <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%', backgroundColor: dashboardPalette.cardBg }}>
             <CardBody className="p-4">
               <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: dashboardPalette.textPrimary }}>
+=======
+          <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%' }}>
+            <CardBody className="p-4">
+              <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: '#333' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 Borrow Status Overview
               </CardTitle>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={borrowStatusData}>
+<<<<<<< HEAD
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#3b3b3b' : '#e5e7eb'} />
                   <XAxis dataKey="name" tick={{ fill: dashboardPalette.textSecondary }} />
                   <YAxis tick={{ fill: dashboardPalette.textSecondary }} />
+=======
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="value" fill="#1976d2" radius={[8, 8, 0, 0]}>
@@ -300,9 +361,15 @@ const AdminDashboard = () => {
 
         {/* Pie/Donut Chart - Resource Status */}
         <Col md={6}>
+<<<<<<< HEAD
           <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%', backgroundColor: dashboardPalette.cardBg }}>
             <CardBody className="p-4">
               <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: dashboardPalette.textPrimary }}>
+=======
+          <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%' }}>
+            <CardBody className="p-4">
+              <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: '#333' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 Resource Status Distribution
               </CardTitle>
               <ResponsiveContainer width="100%" height={300}>
@@ -370,25 +437,41 @@ const AdminDashboard = () => {
                   borderRadius: '12px', 
                   cursor: 'pointer', 
                   transition: 'all 0.3s ease',
+<<<<<<< HEAD
                   borderTop: `4px solid ${stat.color}`,
                   backgroundColor: dashboardPalette.cardBg,
                   boxShadow: dashboardPalette.cardShadow
+=======
+                  borderTop: `4px solid ${stat.color}`
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 }}
                 onClick={() => navigate(stat.path)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
+<<<<<<< HEAD
                   e.currentTarget.style.boxShadow = dashboardPalette.hoverShadow;
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = dashboardPalette.cardShadow;
+=======
+                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 }}
               >
                 <CardBody className="p-3">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ 
+<<<<<<< HEAD
                         color: dashboardPalette.textSecondary, 
+=======
+                        color: '#666', 
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         fontSize: '0.8rem', 
                         margin: 0, 
                         marginBottom: '0.25rem',
@@ -397,7 +480,11 @@ const AdminDashboard = () => {
                         {stat.title}
                       </p>
                       <h4 style={{ 
+<<<<<<< HEAD
                         color: dashboardPalette.textPrimary, 
+=======
+                        color: '#333', 
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         fontSize: '1.5rem', 
                         fontWeight: 'bold', 
                         margin: 0 

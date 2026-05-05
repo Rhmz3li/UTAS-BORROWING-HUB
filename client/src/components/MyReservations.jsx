@@ -72,7 +72,11 @@ const MyReservations = () => {
     };
 
     return (
+<<<<<<< HEAD
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
+=======
+        <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             <Container fluid className="py-4">
             <Row className="mb-4">
                 <Col>
@@ -81,7 +85,11 @@ const MyReservations = () => {
                             <Button
                                 onClick={() => navigate('/home')}
                                 style={{
+<<<<<<< HEAD
                                     background: 'var(--card-bg)',
+=======
+                                    background: '#fff',
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                     color: '#667eea',
                                     border: '2px solid #667eea',
                                     borderRadius: '10px',
@@ -92,10 +100,17 @@ const MyReservations = () => {
                             >
                                 <FaArrowLeft className="me-2" />Back
                             </Button>
+<<<<<<< HEAD
                             <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.25rem' }}>
                                 My Reservations
                             </h2>
                             <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+=======
+                            <h2 style={{ color: '#2c3e50', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                                My Reservations
+                            </h2>
+                            <p style={{ color: '#666', margin: 0 }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                 View and manage your resource reservations
                             </p>
                         </div>
@@ -106,19 +121,30 @@ const MyReservations = () => {
             {/* Filter */}
             <Row className="mb-4">
                 <Col md={4}>
+<<<<<<< HEAD
                     <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
+=======
+                    <Card className="border-0 shadow-sm">
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         <CardBody className="p-3">
                             <select
                                 value={filter}
                                 onChange={(e) => setFilter(e.target.value)}
                                 style={{
                                     width: '100%',
+<<<<<<< HEAD
                                     border: '2px solid var(--input-border)',
                                     borderRadius: '10px',
                                     padding: '0.75rem',
                                     fontSize: '1rem',
                                     backgroundColor: 'var(--input-bg)',
                                     color: 'var(--text-primary)',
+=======
+                                    border: '2px solid #e0e0e0',
+                                    borderRadius: '10px',
+                                    padding: '0.75rem',
+                                    fontSize: '1rem',
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                     cursor: 'pointer'
                                 }}
                             >
@@ -139,13 +165,20 @@ const MyReservations = () => {
                     <p className="mt-3">Loading reservations...</p>
                 </div>
             ) : (
+<<<<<<< HEAD
                 <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
                     <CardBody style={{ padding: '1.5rem', backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)' }}>
                         <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: 'var(--text-primary)' }}>
+=======
+                <Card className="border-0 shadow-lg" style={{ borderRadius: '20px' }}>
+                    <CardBody style={{ padding: '1.5rem' }}>
+                        <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: '#2c3e50' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                             Reservation History
                         </CardTitle>
                         {filteredReservations.length > 0 ? (
                             <div className="table-responsive">
+<<<<<<< HEAD
                                 <Table hover style={{ margin: 0, color: 'var(--text-primary)', backgroundColor: 'var(--card-bg)' }}>
                                     <thead style={{ background: 'var(--bg-tertiary)' }}>
                                         <tr>
@@ -155,6 +188,17 @@ const MyReservations = () => {
                                             <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Expiry Date</th>
                                             <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Status</th>
                                             <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Actions</th>
+=======
+                                <Table hover style={{ margin: 0 }}>
+                                    <thead style={{ background: '#f8f9fa' }}>
+                                        <tr>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Resource</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Reservation Date</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Pickup Date</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Expiry Date</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Actions</th>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -166,23 +210,39 @@ const MyReservations = () => {
                                             return (
                                                 <tr 
                                                     key={reservation._id}
+<<<<<<< HEAD
                                                     style={isExpired ? { background: 'rgba(255, 152, 0, 0.12)' } : {}}
+=======
+                                                    style={isExpired ? { background: '#fff3e0' } : {}}
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                 >
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div>
                                                             <FaCalendarCheck className="me-2" style={{ color: '#4facfe' }} />
+<<<<<<< HEAD
                                                             <strong style={{ color: 'var(--text-primary)' }}>
                                                                 {reservation.resource_id?.name || 'Unknown'}
                                                             </strong>
                                                             {reservation.resource_id?.category && (
                                                                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+=======
+                                                            <strong style={{ color: '#333' }}>
+                                                                {reservation.resource_id?.name || 'Unknown'}
+                                                            </strong>
+                                                            {reservation.resource_id?.category && (
+                                                                <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                     {reservation.resource_id.category}
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
+<<<<<<< HEAD
                                                         <span style={{ color: 'var(--text-secondary)' }}>
+=======
+                                                        <span style={{ color: '#666' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                             {reservation.reservation_date ? new Date(reservation.reservation_date).toLocaleDateString('en-US', {
                                                                 year: 'numeric',
                                                                 month: 'short',
@@ -191,7 +251,11 @@ const MyReservations = () => {
                                                         </span>
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
+<<<<<<< HEAD
                                                         <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>
+=======
+                                                        <span style={{ color: '#666', fontWeight: '600' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                             {reservation.pickup_date ? new Date(reservation.pickup_date).toLocaleDateString('en-US', {
                                                                 year: 'numeric',
                                                                 month: 'short',
@@ -201,7 +265,11 @@ const MyReservations = () => {
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+<<<<<<< HEAD
                                                             <span style={{ color: isExpired ? '#f44336' : 'var(--text-secondary)' }}>
+=======
+                                                            <span style={{ color: isExpired ? '#f44336' : '#666' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                 {reservation.expiry_date ? new Date(reservation.expiry_date).toLocaleDateString('en-US', {
                                                                     year: 'numeric',
                                                                     month: 'short',
@@ -256,8 +324,13 @@ const MyReservations = () => {
                         ) : (
                             <div className="text-center py-5">
                                 <FaCalendarCheck size={64} style={{ color: '#ccc', marginBottom: '1rem' }} />
+<<<<<<< HEAD
                                 <h5 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Reservations Found</h5>
                                 <p style={{ color: 'var(--text-secondary)' }}>
+=======
+                                <h5 style={{ color: '#666', marginBottom: '0.5rem' }}>No Reservations Found</h5>
+                                <p style={{ color: '#999' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                     {filter === 'all' 
                                         ? "You don't have any reservations yet."
                                         : `No ${filter.toLowerCase()} reservations found.`}

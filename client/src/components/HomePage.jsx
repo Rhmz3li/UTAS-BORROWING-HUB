@@ -853,7 +853,11 @@ const Home = () => {
             {/* Stats Dashboard */}
             <Row className="mb-3">
                 <Col>
+<<<<<<< HEAD
                     <h4 className="mb-0" style={{ color: 'var(--text-primary)', fontWeight: 'bold', fontSize: '1.5rem' }}>
+=======
+                    <h4 className="mb-0" style={{ color: '#2c3e50', fontWeight: 'bold', fontSize: '1.5rem' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         <FaChartLine className="me-2" style={{ color: '#1976d2' }} />Your Statistics
                     </h4>
                 </Col>
@@ -1307,7 +1311,11 @@ const Home = () => {
                             ))}
                         </div>
                     </div>
+<<<<<<< HEAD
                     <div className="border rounded p-3 mb-3" style={{ minHeight: '260px', maxHeight: '320px', overflowY: 'auto', background: 'var(--bg-tertiary)', borderColor: 'var(--border-color)' }}>
+=======
+                    <div className="border rounded p-3 mb-3" style={{ minHeight: '260px', maxHeight: '320px', overflowY: 'auto', background: '#f8f9fa' }}>
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         {chatMessages.map((message, index) => (
                             <div
                                 key={`${message.type}-${index}`}
@@ -1322,9 +1330,15 @@ const Home = () => {
                                         maxWidth: '85%',
                                         padding: '0.7rem 0.95rem',
                                         borderRadius: '14px',
+<<<<<<< HEAD
                                         background: message.type === 'user' ? '#1976d2' : 'var(--card-bg)',
                                         color: message.type === 'user' ? '#fff' : 'var(--text-primary)',
                                         border: message.type === 'user' ? 'none' : '1px solid var(--border-color)',
+=======
+                                        background: message.type === 'user' ? '#1976d2' : '#ffffff',
+                                        color: message.type === 'user' ? '#fff' : '#333',
+                                        border: message.type === 'user' ? 'none' : '1px solid #e0e0e0',
+>>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         whiteSpace: 'pre-wrap',
                                         lineHeight: 1.5
                                     }}
