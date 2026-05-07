@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+﻿import React, { useEffect } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, ListGroup, ListGroupItem, Badge, Button } from "reactstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -67,11 +67,7 @@ const Notifications = () => {
     };
 
     return (
-<<<<<<< HEAD
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
-=======
-        <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             <Container fluid className="py-4">
             <Row className="mb-4">
                 <Col>
@@ -79,11 +75,7 @@ const Notifications = () => {
                         <Button color="link" className="me-3" onClick={() => navigate('/home')}>
                             <FaArrowLeft /> Back
                         </Button>
-<<<<<<< HEAD
                         <h2 className="mb-0" style={{ color: 'var(--text-primary)' }}>Notifications</h2>
-=======
-                        <h2 className="mb-0">Notifications</h2>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                     </div>
                 </Col>
             </Row>
@@ -95,13 +87,8 @@ const Notifications = () => {
                     </div>
                 </div>
             ) : (
-<<<<<<< HEAD
                 <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
                     <CardBody style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)' }}>
-=======
-                <Card className="border-0 shadow-sm">
-                    <CardBody>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         {Array.isArray(notifications?.notifications || notifications) && (notifications?.notifications || notifications).length > 0 ? (
                             <ListGroup flush>
                                 {(notifications?.notifications || notifications).map((notification) => {
@@ -112,31 +99,18 @@ const Notifications = () => {
                                             key={notification._id}
                                             className="d-flex align-items-start"
                                             onClick={() => handleNotificationClick(notification)}
-<<<<<<< HEAD
                                             style={{ cursor: 'pointer', backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}
-=======
-                                            style={{ cursor: 'pointer' }}
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         >
                                             <NotificationIcon className={`me-3 mt-1 text-${color}`} size={20} />
                                             <div className="flex-grow-1">
                                                 <div className="d-flex justify-content-between align-items-start mb-1">
-<<<<<<< HEAD
                                                     <strong style={{ color: 'var(--text-primary)' }}>{notification.title}</strong>
-=======
-                                                    <strong>{notification.title}</strong>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                     {!notification.is_read && (
                                                         <Badge color="primary">New</Badge>
                                                     )}
                                                 </div>
-<<<<<<< HEAD
                                                 <p className="mb-1" style={{ color: 'var(--text-secondary)' }}>{notification.message}</p>
                                                 <small style={{ color: 'var(--text-secondary)' }}>
-=======
-                                                <p className="mb-1 text-muted">{notification.message}</p>
-                                                <small className="text-muted">
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                     {notification.created_at ? new Date(notification.created_at).toLocaleString() : 'N/A'}
                                                 </small>
                                             </div>

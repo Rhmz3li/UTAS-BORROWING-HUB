@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --primary-color: #0066cc;
   --secondary-color: #ff6600;
   --success-color: #28a745;
@@ -177,15 +177,12 @@ code {
   border-color: var(--border-color);
 }
 
-<<<<<<< HEAD
 [data-theme="dark"] .table > :not(caption) > * > * {
   background-color: var(--card-bg) !important;
   color: var(--text-primary) !important;
   border-color: var(--border-color) !important;
 }
 
-=======
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
 [data-theme="dark"] .table tbody tr:hover {
   background-color: var(--hover-bg);
 }

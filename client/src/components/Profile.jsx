@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, Form, FormGroup, Label, Input, Button, Alert, Modal, ModalHeader, ModalBody, ModalFooter } from "reactstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -6,10 +6,7 @@ import { fetchProfile } from "../redux/reducers/authReducer";
 import { FaUser, FaEnvelope, FaPhone, FaBuilding, FaSave, FaSpinner, FaLock, FaEye, FaEyeSlash, FaArrowLeft, FaTimes } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import axios from 'axios';
-<<<<<<< HEAD
 import { useTheme } from '../contexts/ThemeContext.jsx';
-=======
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
 
 /** Oman mobile: exactly 8 digits, first digit 7 or 9. When submitRequired, empty is invalid. */
 const validateOmaniPhone = (phone, { submitRequired = false } = {}) => {
@@ -30,7 +27,7 @@ const getPhoneInlineError = (phone) => {
     return '';
 };
 
-/** English letters only (A–Z, a–z), spaces, and hyphen. No digits or other symbols. */
+/** English letters only (Aâ€“Z, aâ€“z), spaces, and hyphen. No digits or other symbols. */
 const validateFullName = (raw) => {
     const t = String(raw || '').trim();
     if (!t) return 'Full name is required.';
@@ -49,16 +46,13 @@ const getFullNameInlineError = (raw) => {
     return validateFullName(raw);
 };
 
-/** Delay before showing unsaved-changes banner while edits are pending (~1–2 minutes). */
+/** Delay before showing unsaved-changes banner while edits are pending (~1â€“2 minutes). */
 const UNSAVED_CHANGES_BANNER_MS = 90 * 1000;
 
 const Profile = () => {
     const dispatch = useDispatch();
     const navigate = useNavigate();
-<<<<<<< HEAD
     const { isDark } = useTheme();
-=======
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
     const { user } = useSelector((state) => state.auth);
     const [formData, setFormData] = useState({
         full_name: '',
@@ -89,7 +83,6 @@ const Profile = () => {
     const [fullNameError, setFullNameError] = useState('');
     const [departmentError, setDepartmentError] = useState('');
     const [unsavedChangesDetected, setUnsavedChangesDetected] = useState(false);
-<<<<<<< HEAD
     const profilePalette = isDark
         ? {
             pageBg: 'var(--bg-secondary)',
@@ -105,8 +98,6 @@ const Profile = () => {
             cardBg: 'var(--card-bg)',
             cardShadow: '0 8px 24px rgba(0,0,0,0.12)'
         };
-=======
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
 
     useEffect(() => {
         if (!hasChanges) {
@@ -411,17 +402,10 @@ const Profile = () => {
 
     if (isLoading) {
         return (
-<<<<<<< HEAD
             <div style={{ marginLeft: '280px', minHeight: '100vh', background: profilePalette.pageBg, padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ textAlign: 'center' }}>
                     <FaSpinner className="fa-spin" style={{ fontSize: '3rem', color: '#1976d2', marginBottom: '1rem' }} />
                     <p style={{ color: profilePalette.subText, fontSize: '1.1rem' }}>Loading profile...</p>
-=======
-            <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <FaSpinner className="fa-spin" style={{ fontSize: '3rem', color: '#1976d2', marginBottom: '1rem' }} />
-                    <p style={{ color: '#666', fontSize: '1.1rem' }}>Loading profile...</p>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 </div>
             </div>
         );
@@ -432,11 +416,7 @@ const Profile = () => {
             marginLeft: '280px',
             padding: '2rem', 
             minHeight: '100vh', 
-<<<<<<< HEAD
             background: profilePalette.pageBg,
-=======
-            background: 'var(--bg-secondary)',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             transition: 'all 0.3s ease',
             position: 'relative',
             zIndex: 1,
@@ -445,19 +425,11 @@ const Profile = () => {
             <Container>
                 <Row className="justify-content-center">
                     <Col md={10} lg={8}>
-<<<<<<< HEAD
                         <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', overflow: 'hidden', backgroundColor: profilePalette.cardBg, boxShadow: profilePalette.cardShadow }}>
                             <CardBody style={{ padding: '2.5rem', backgroundColor: profilePalette.cardBg }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
                                     <CardTitle tag="h3" className="mb-0" style={{ 
                                         color: profilePalette.title, 
-=======
-                        <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', overflow: 'hidden' }}>
-                            <CardBody style={{ padding: '2.5rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                                    <CardTitle tag="h3" className="mb-0" style={{ 
-                                        color: '#2c3e50', 
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         fontWeight: 'bold',
                                         display: 'flex',
                                         alignItems: 'center',
@@ -923,11 +895,7 @@ const Profile = () => {
 
                                 <Form onSubmit={handlePasswordSubmit}>
                                     <FormGroup>
-<<<<<<< HEAD
                                         <Label style={{ fontWeight: '600', color: profilePalette.title, marginBottom: '0.75rem' }}>
-=======
-                                        <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                             <FaLock className="me-2" style={{ color: '#667eea' }} />
                                             Current Password {user?.role === 'Admin' ? '(Optional)' : '*'}
                                         </Label>
@@ -940,19 +908,12 @@ const Profile = () => {
                                                 required={user?.role !== 'Admin'}
                                                 placeholder={user?.role === 'Admin' ? 'Leave blank if setting password for the first time' : 'Enter current password'}
                                                 style={{
-<<<<<<< HEAD
                                                     border: passwordErrors.currentPassword ? '2px solid #f44336' : '2px solid var(--input-border)',
                                                     borderRadius: '10px',
                                                     padding: '0.75rem 3rem 0.75rem 0.75rem',
                                                     fontSize: '1rem',
                                                     backgroundColor: 'var(--input-bg)',
                                                     color: 'var(--text-primary)'
-=======
-                                                    border: passwordErrors.currentPassword ? '2px solid #f44336' : '2px solid #e0e0e0',
-                                                    borderRadius: '10px',
-                                                    padding: '0.75rem 3rem 0.75rem 0.75rem',
-                                                    fontSize: '1rem'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                 }}
                                             />
                                             <Button
@@ -965,11 +926,7 @@ const Profile = () => {
                                                     transform: 'translateY(-50%)',
                                                     background: 'transparent',
                                                     border: 'none',
-<<<<<<< HEAD
                                                     color: 'var(--text-secondary)',
-=======
-                                                    color: '#666',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                     padding: '0.5rem'
                                                 }}
                                             >
@@ -982,22 +939,14 @@ const Profile = () => {
                                             </small>
                                         )}
                                         {user?.role === 'Admin' && (
-<<<<<<< HEAD
                                             <small style={{ color: 'var(--text-secondary)', marginTop: '0.25rem', display: 'block', fontStyle: 'italic' }}>
-=======
-                                            <small style={{ color: '#666', marginTop: '0.25rem', display: 'block', fontStyle: 'italic' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                 Leave blank if you don't have a password set yet
                                             </small>
                                         )}
                                     </FormGroup>
 
                                     <FormGroup>
-<<<<<<< HEAD
                                         <Label style={{ fontWeight: '600', color: profilePalette.title, marginBottom: '0.75rem' }}>
-=======
-                                        <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                             <FaLock className="me-2" style={{ color: '#667eea' }} />New Password *
                                         </Label>
                                         <div style={{ position: 'relative' }}>
@@ -1008,19 +957,12 @@ const Profile = () => {
                                                 onChange={handlePasswordChange}
                                                 required
                                                 style={{
-<<<<<<< HEAD
                                                     border: passwordErrors.newPassword ? '2px solid #f44336' : '2px solid var(--input-border)',
                                                     borderRadius: '10px',
                                                     padding: '0.75rem 3rem 0.75rem 0.75rem',
                                                     fontSize: '1rem',
                                                     backgroundColor: 'var(--input-bg)',
                                                     color: 'var(--text-primary)'
-=======
-                                                    border: passwordErrors.newPassword ? '2px solid #f44336' : '2px solid #e0e0e0',
-                                                    borderRadius: '10px',
-                                                    padding: '0.75rem 3rem 0.75rem 0.75rem',
-                                                    fontSize: '1rem'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                 }}
                                             />
                                             <Button
@@ -1033,11 +975,7 @@ const Profile = () => {
                                                     transform: 'translateY(-50%)',
                                                     background: 'transparent',
                                                     border: 'none',
-<<<<<<< HEAD
                                                     color: 'var(--text-secondary)',
-=======
-                                                    color: '#666',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                     padding: '0.5rem'
                                                 }}
                                             >
@@ -1052,11 +990,7 @@ const Profile = () => {
                                     </FormGroup>
 
                                     <FormGroup>
-<<<<<<< HEAD
                                         <Label style={{ fontWeight: '600', color: profilePalette.title, marginBottom: '0.75rem' }}>
-=======
-                                        <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                             <FaLock className="me-2" style={{ color: '#667eea' }} />Confirm New Password *
                                         </Label>
                                         <div style={{ position: 'relative' }}>
@@ -1067,19 +1001,12 @@ const Profile = () => {
                                                 onChange={handlePasswordChange}
                                                 required
                                                 style={{
-<<<<<<< HEAD
                                                     border: passwordErrors.confirmPassword ? '2px solid #f44336' : '2px solid var(--input-border)',
                                                     borderRadius: '10px',
                                                     padding: '0.75rem 3rem 0.75rem 0.75rem',
                                                     fontSize: '1rem',
                                                     backgroundColor: 'var(--input-bg)',
                                                     color: 'var(--text-primary)'
-=======
-                                                    border: passwordErrors.confirmPassword ? '2px solid #f44336' : '2px solid #e0e0e0',
-                                                    borderRadius: '10px',
-                                                    padding: '0.75rem 3rem 0.75rem 0.75rem',
-                                                    fontSize: '1rem'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                 }}
                                             />
                                             <Button
@@ -1092,11 +1019,7 @@ const Profile = () => {
                                                     transform: 'translateY(-50%)',
                                                     background: 'transparent',
                                                     border: 'none',
-<<<<<<< HEAD
                                                     color: 'var(--text-secondary)',
-=======
-                                                    color: '#666',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                     padding: '0.5rem'
                                                 }}
                                             >
@@ -1112,7 +1035,7 @@ const Profile = () => {
                                          passwordData.newPassword === passwordData.confirmPassword && 
                                          !passwordErrors.newPassword && (
                                             <small style={{ color: '#4caf50', marginTop: '0.25rem', display: 'block' }}>
-                                                ✓ Passwords match
+                                                âœ“ Passwords match
                                             </small>
                                         )}
                                     </FormGroup>
@@ -1130,13 +1053,8 @@ const Profile = () => {
                                         setPasswordErrors({});
                                     }}
                                     style={{
-<<<<<<< HEAD
                                         background: 'var(--bg-tertiary)',
                                         color: 'var(--text-primary)',
-=======
-                                        background: '#f5f5f5',
-                                        color: '#666',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         border: 'none',
                                         borderRadius: '10px',
                                         padding: '0.75rem 1.5rem',

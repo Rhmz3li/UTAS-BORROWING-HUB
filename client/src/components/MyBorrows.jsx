@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+﻿import React, { useEffect } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Spinner, Alert } from "reactstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -41,11 +41,7 @@ const MyBorrows = () => {
     };
 
     return (
-<<<<<<< HEAD
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
-=======
-        <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             <Container fluid className="py-4">
             <Row className="mb-4">
                 <Col>
@@ -54,11 +50,7 @@ const MyBorrows = () => {
                             <Button
                                 onClick={() => navigate('/home')}
                                 style={{
-<<<<<<< HEAD
                                     background: 'var(--card-bg)',
-=======
-                                    background: '#fff',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                     color: '#667eea',
                                     border: '2px solid #667eea',
                                     borderRadius: '10px',
@@ -69,17 +61,10 @@ const MyBorrows = () => {
                             >
                                 <FaArrowLeft className="me-2" />Back
                             </Button>
-<<<<<<< HEAD
                             <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.25rem' }}>
                                 My Borrows
                             </h2>
                             <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-=======
-                            <h2 style={{ color: '#2c3e50', fontWeight: 'bold', marginBottom: '0.25rem' }}>
-                                My Borrows
-                            </h2>
-                            <p style={{ color: '#666', margin: 0 }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                 View and manage your borrowed resources
                             </p>
                         </div>
@@ -101,20 +86,13 @@ const MyBorrows = () => {
                     </Button>
                 </Alert>
             ) : (
-<<<<<<< HEAD
                 <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
                     <CardBody style={{ padding: '1.5rem', backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)' }}>
                         <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: 'var(--text-primary)' }}>
-=======
-                <Card className="border-0 shadow-lg" style={{ borderRadius: '20px' }}>
-                    <CardBody style={{ padding: '1.5rem' }}>
-                        <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: '#2c3e50' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                             Borrowed Resources
                         </CardTitle>
                         {Array.isArray(borrows) && borrows.length > 0 ? (
                             <div className="table-responsive">
-<<<<<<< HEAD
                                 <Table hover style={{ margin: 0, color: 'var(--text-primary)', backgroundColor: 'var(--card-bg)' }}>
                                     <thead style={{ background: 'var(--bg-tertiary)' }}>
                                         <tr>
@@ -123,16 +101,6 @@ const MyBorrows = () => {
                                             <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Due Date</th>
                                             <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Approval Status</th>
                                             <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Actions</th>
-=======
-                                <Table hover style={{ margin: 0 }}>
-                                    <thead style={{ background: '#f8f9fa' }}>
-                                        <tr>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Resource</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Borrow Date</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Due Date</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Approval Status</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Actions</th>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -149,39 +117,23 @@ const MyBorrows = () => {
                                             return (
                                                 <tr 
                                                     key={borrow._id}
-<<<<<<< HEAD
                                                     style={isOverdueRow ? { background: 'rgba(255, 152, 0, 0.12)' } : {}}
-=======
-                                                    style={isOverdueRow ? { background: '#fff3e0' } : {}}
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                 >
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div>
                                                             <FaBook className="me-2" style={{ color: '#667eea' }} />
-<<<<<<< HEAD
                                                             <strong style={{ color: 'var(--text-primary)' }}>
                                                                 {borrow.resource_id?.name || 'Unknown'}
                                                             </strong>
                                                             {borrow.resource_id?.category && (
                                                                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-=======
-                                                            <strong style={{ color: '#333' }}>
-                                                                {borrow.resource_id?.name || 'Unknown'}
-                                                            </strong>
-                                                            {borrow.resource_id?.category && (
-                                                                <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                     {borrow.resource_id.category}
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-<<<<<<< HEAD
                                                         <span style={{ color: 'var(--text-secondary)' }}>
-=======
-                                                        <span style={{ color: '#666' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                             {borrow.borrow_date ? new Date(borrow.borrow_date).toLocaleDateString('en-US', {
                                                                 year: 'numeric',
                                                                 month: 'short',
@@ -191,13 +143,8 @@ const MyBorrows = () => {
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-<<<<<<< HEAD
                                                             <FaClock style={{ color: isOverdueRow ? '#f44336' : 'var(--text-secondary)' }} />
                                                             <span style={{ color: isOverdueRow ? '#f44336' : 'var(--text-secondary)', fontWeight: isOverdueRow ? '600' : 'normal' }}>
-=======
-                                                            <FaClock style={{ color: isOverdueRow ? '#f44336' : '#666' }} />
-                                                            <span style={{ color: isOverdueRow ? '#f44336' : '#666', fontWeight: isOverdueRow ? '600' : 'normal' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                 {borrow.due_date ? new Date(borrow.due_date).toLocaleDateString('en-US', {
                                                                     year: 'numeric',
                                                                     month: 'short',
@@ -206,11 +153,7 @@ const MyBorrows = () => {
                                                             </span>
                                                         </div>
                                                         {daysUntilDue !== null && (canRequestReturn || isReturnPendingStaff) && (
-<<<<<<< HEAD
                                                             <div style={{ fontSize: '0.75rem', color: isOverdueRow ? '#f44336' : daysUntilDue <= 3 ? '#ff9800' : 'var(--text-secondary)', marginTop: '0.25rem' }}>
-=======
-                                                            <div style={{ fontSize: '0.75rem', color: isOverdueRow ? '#f44336' : daysUntilDue <= 3 ? '#ff9800' : '#666', marginTop: '0.25rem' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                 {isOverdueRow
                                                                     ? `${Math.abs(daysUntilDue)} day(s) overdue`
                                                                     : daysUntilDue <= 3
@@ -313,11 +256,7 @@ const MyBorrows = () => {
                                                         ) : (
                                                             <Badge style={{
                                                                 background: '#f5f5f5',
-<<<<<<< HEAD
                                                                 color: 'var(--text-secondary)',
-=======
-                                                                color: '#666',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                 padding: '0.4rem 0.8rem',
                                                                 borderRadius: '20px',
                                                                 fontSize: '0.85rem',
@@ -351,15 +290,11 @@ const MyBorrows = () => {
                                                         )}
                                                         {isReturnPendingStaff && (
                                                             <span style={{ fontSize: '0.85rem', color: '#1565c0', fontStyle: 'italic' }}>
-                                                                Waiting for hub staff to confirm receipt — item stays on loan until then.
+                                                                Waiting for hub staff to confirm receipt â€” item stays on loan until then.
                                                             </span>
                                                         )}
                                                         {borrow.status === 'Returned' && borrow.return_date && (
-<<<<<<< HEAD
                                                             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-=======
-                                                            <span style={{ fontSize: '0.85rem', color: '#666' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                                 Returned: {new Date(borrow.return_date).toLocaleDateString()}
                                                             </span>
                                                         )}
@@ -378,13 +313,8 @@ const MyBorrows = () => {
                         ) : (
                             <div className="text-center py-5">
                                 <FaBook size={64} style={{ color: '#ccc', marginBottom: '1rem' }} />
-<<<<<<< HEAD
                                 <h5 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Borrows Found</h5>
                                 <p style={{ color: 'var(--text-secondary)' }}>
-=======
-                                <h5 style={{ color: '#666', marginBottom: '0.5rem' }}>No Borrows Found</h5>
-                                <p style={{ color: '#999' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                     You don't have any borrowed resources yet.
                                 </p>
                                 <Button 

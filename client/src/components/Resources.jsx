@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, CardText, Button, Input, InputGroup, InputGroupText, Badge, Modal, ModalHeader, ModalBody, ModalFooter, Label, FormGroup } from "reactstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -280,11 +280,7 @@ const Resources = () => {
     };
 
     return (
-<<<<<<< HEAD
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
-=======
-        <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             <Container fluid className="py-4">
             {/* Header Section */}
             <Row className="mb-4">
@@ -329,11 +325,7 @@ const Resources = () => {
             {/* Search and Filter Section */}
             <Row className="mb-4">
                 <Col md={8}>
-<<<<<<< HEAD
                     <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
-=======
-                    <Card className="border-0 shadow-sm">
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         <CardBody className="p-3">
                             <InputGroup style={{ border: 'none' }}>
                                 <InputGroupText style={{ 
@@ -350,19 +342,12 @@ const Resources = () => {
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     style={{
-<<<<<<< HEAD
                                         border: '2px solid var(--input-border)',
                                         borderRadius: '0 10px 10px 0',
                                         padding: '0.75rem',
                                         fontSize: '1rem',
                                         backgroundColor: 'var(--input-bg)',
                                         color: 'var(--text-primary)'
-=======
-                                        border: '2px solid #e0e0e0',
-                                        borderRadius: '0 10px 10px 0',
-                                        padding: '0.75rem',
-                                        fontSize: '1rem'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                     }}
                                 />
                             </InputGroup>
@@ -370,11 +355,7 @@ const Resources = () => {
                     </Card>
                 </Col>
                 <Col md={4}>
-<<<<<<< HEAD
                     <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
-=======
-                    <Card className="border-0 shadow-sm">
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         <CardBody className="p-3">
                             <Input
                                 type="text"
@@ -383,19 +364,12 @@ const Resources = () => {
                                 onChange={(e) => setSelectedCategory(e.target.value)}
                                 placeholder="Filter by category..."
                                 style={{
-<<<<<<< HEAD
                                     border: '2px solid var(--input-border)',
                                     borderRadius: '10px',
                                     padding: '0.75rem',
                                     fontSize: '1rem',
                                     backgroundColor: 'var(--input-bg)',
                                     color: 'var(--text-primary)'
-=======
-                                    border: '2px solid #e0e0e0',
-                                    borderRadius: '10px',
-                                    padding: '0.75rem',
-                                    fontSize: '1rem'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                 }}
                             />
                             <datalist id="resource-category-options">
@@ -433,13 +407,8 @@ const Resources = () => {
                                             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                             overflow: 'hidden',
                                             borderRadius: '20px',
-<<<<<<< HEAD
                                             background: 'var(--card-bg)',
                                             boxShadow: '0 8px 24px var(--card-shadow)',
-=======
-                                            background: '#fff',
-                                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                             border: '1px solid rgba(102, 126, 234, 0.1)'
                                         }}
                                         onMouseEnter={(e) => {
@@ -515,11 +484,7 @@ const Resources = () => {
                                                 className="mb-2"
                                                 style={{
                                                     fontWeight: 'bold',
-<<<<<<< HEAD
                                                     color: 'var(--text-primary)',
-=======
-                                                    color: '#333',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                                     fontSize: '1rem',
                                                     lineHeight: '1.4',
                                                     minHeight: '2.8rem',
@@ -653,7 +618,7 @@ const Resources = () => {
                                                             ? `Only available for ${resource.department} department`
                                                             : !isAvailableForAction
                                                                 ? `This resource is currently ${resource.status || 'unavailable'}`
-                                                                : '⏳ Reserve - Requires Admin Approval: Reserve for future pickup, borrow period starts when picked up'
+                                                                : 'â³ Reserve - Requires Admin Approval: Reserve for future pickup, borrow period starts when picked up'
                                                     }
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -708,13 +673,8 @@ const Resources = () => {
                                     }}>
                                         <FaBox size={50} style={{ color: '#fff' }} />
                                     </div>
-<<<<<<< HEAD
                                     <h4 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Resources Found</h4>
                                     <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-=======
-                                    <h4 style={{ color: '#2c3e50', marginBottom: '0.5rem' }}>No Resources Found</h4>
-                                    <p style={{ color: '#7f8c8d', margin: 0 }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                         Try adjusting your search or filter criteria
                                     </p>
                                 </CardBody>
@@ -737,11 +697,7 @@ const Resources = () => {
                     {selectedResource && (
                         <>
                             <div className="mb-3">
-<<<<<<< HEAD
                                 <h5 style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{selectedResource.name}</h5>
-=======
-                                <h5 style={{ fontWeight: 'bold', color: '#333' }}>{selectedResource.name}</h5>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                 <p className="text-muted small mb-2">{selectedResource.description}</p>
                                 <div className="d-flex gap-2 mb-3">
                                     <Badge color="primary">{selectedResource.category}</Badge>
@@ -765,11 +721,7 @@ const Resources = () => {
                                             <FaMapMarkerAlt className="me-1" />
                                             Pickup Location:
                                         </strong>
-<<<<<<< HEAD
                                         <span className="ms-2" style={{ color: 'var(--text-primary)' }}>
-=======
-                                        <span className="ms-2" style={{ color: '#333' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                             {selectedResource.location}
                                         </span>
                                     </div>
@@ -917,11 +869,7 @@ const Resources = () => {
                     {selectedResource && (
                         <>
                             <div className="mb-3">
-<<<<<<< HEAD
                                 <h5 style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{selectedResource.name}</h5>
-=======
-                                <h5 style={{ fontWeight: 'bold', color: '#333' }}>{selectedResource.name}</h5>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                 <p className="text-muted small mb-2">{selectedResource.description}</p>
                                 <div className="d-flex gap-2 mb-3">
                                     <Badge color="primary">{selectedResource.category}</Badge>
@@ -945,11 +893,7 @@ const Resources = () => {
                                             <FaMapMarkerAlt className="me-1" />
                                             Pickup Location:
                                         </strong>
-<<<<<<< HEAD
                                         <span className="ms-2" style={{ color: 'var(--text-primary)' }}>
-=======
-                                        <span className="ms-2" style={{ color: '#333' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                                             {selectedResource.location}
                                         </span>
                                     </div>
@@ -961,7 +905,7 @@ const Resources = () => {
                                     border: '2px solid #17a2b8'
                                 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem' }}>
-                                        <span style={{ fontSize: '1.2rem', marginRight: '0.5rem' }}>⏳</span>
+                                        <span style={{ fontSize: '1.2rem', marginRight: '0.5rem' }}>â³</span>
                                         <strong style={{ color: '#0c5460' }}>Reservation Policy</strong>
                                     </div>
                                     <p className="small mb-0" style={{ color: '#0c5460', lineHeight: '1.6' }}>

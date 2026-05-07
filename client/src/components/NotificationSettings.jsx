@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, CardBody, Button, Input, Spinner } from 'reactstrap';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
@@ -85,11 +85,7 @@ const NotificationSettings = () => {
   if (!user) return null;
 
   return (
-<<<<<<< HEAD
     <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
-=======
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
       <Container fluid className="py-4">
         <Row className="mb-4">
           <Col>
@@ -97,28 +93,17 @@ const NotificationSettings = () => {
               <Button color="link" className="me-3 p-0" onClick={() => navigate('/home')}>
                 <FaArrowLeft /> Back
               </Button>
-<<<<<<< HEAD
               <h2 className="mb-0 d-flex align-items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-=======
-              <h2 className="mb-0 d-flex align-items-center gap-2">
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 <FaBell /> Notification Settings
               </h2>
             </div>
           </Col>
         </Row>
 
-<<<<<<< HEAD
         <Card className="border-0 shadow-sm rounded-3 overflow-hidden" style={{ backgroundColor: 'var(--card-bg)' }}>
           <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)' }}>
             <div className="p-4 pb-0">
               <p className="mb-0 small" style={{ color: 'var(--text-secondary)' }}>
-=======
-        <Card className="border-0 shadow-sm rounded-3 overflow-hidden">
-          <CardBody className="p-0">
-            <div className="p-4 pb-0">
-              <p className="text-muted mb-0 small">
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 Choose which notifications you want and how to receive them: <strong>In-App</strong> (bell icon) and/or <strong>Email</strong>.
               </p>
             </div>
@@ -131,13 +116,8 @@ const NotificationSettings = () => {
               <>
                 {/* Header row */}
                 <div
-<<<<<<< HEAD
                   className="d-none d-md-flex align-items-center px-4 py-3 small text-uppercase fw-bold"
                   style={{ background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}
-=======
-                  className="d-none d-md-flex align-items-center px-4 py-3 text-muted small text-uppercase fw-bold"
-                  style={{ background: 'rgba(0,0,0,.04)', borderBottom: '1px solid rgba(0,0,0,.06)' }}
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                 >
                   <div style={{ flex: '1 1 50%' }}>Notification type</div>
                   <div className="d-flex align-items-center justify-content-center gap-4" style={{ flex: '0 0 220px' }}>
@@ -155,13 +135,8 @@ const NotificationSettings = () => {
                     key={key}
                     className="d-flex flex-wrap align-items-center px-4 py-3 gap-3"
                     style={{
-<<<<<<< HEAD
                       borderBottom: idx < NOTIFICATION_OPTIONS.length - 1 ? '1px solid var(--border-color)' : 'none',
                       background: idx % 2 === 0 ? 'transparent' : 'var(--bg-tertiary)'
-=======
-                      borderBottom: idx < NOTIFICATION_OPTIONS.length - 1 ? '1px solid rgba(0,0,0,.06)' : 'none',
-                      background: idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.02)'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                     }}
                   >
                     <div className="d-flex align-items-center gap-3 flex-grow-1 min-w-0">
@@ -171,11 +146,7 @@ const NotificationSettings = () => {
                       >
                         <Icon size={18} />
                       </div>
-<<<<<<< HEAD
                       <span className="fw-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
-=======
-                      <span className="fw-medium text-dark">{label}</span>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                     </div>
                     <div className="d-flex align-items-center gap-4">
                       <label className="d-flex align-items-center gap-2 mb-0 cursor-pointer" style={{ cursor: 'pointer' }}>
@@ -185,11 +156,7 @@ const NotificationSettings = () => {
                           checked={!!(prefs[key] && prefs[key].inApp !== false)}
                           onChange={() => handleToggle(key, 'inApp')}
                         />
-<<<<<<< HEAD
                         <span className="small d-md-none" style={{ color: 'var(--text-secondary)' }}>In-App</span>
-=======
-                        <span className="small text-muted d-md-none">In-App</span>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                       </label>
                       <label className="d-flex align-items-center gap-2 mb-0 cursor-pointer" style={{ cursor: 'pointer' }}>
                         <Input
@@ -198,21 +165,13 @@ const NotificationSettings = () => {
                           checked={!!(prefs[key] && prefs[key].email !== false)}
                           onChange={() => handleToggle(key, 'email')}
                         />
-<<<<<<< HEAD
                         <span className="small d-md-none" style={{ color: 'var(--text-secondary)' }}>Email</span>
-=======
-                        <span className="small text-muted d-md-none">Email</span>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                       </label>
                     </div>
                   </div>
                 ))}
 
-<<<<<<< HEAD
                 <div className="p-4 pt-3 d-flex justify-content-end" style={{ background: 'var(--bg-tertiary)', borderTop: '1px solid var(--border-color)' }}>
-=======
-                <div className="p-4 pt-3 d-flex justify-content-end" style={{ background: 'rgba(0,0,0,.02)', borderTop: '1px solid rgba(0,0,0,.06)' }}>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                   <Button color="primary" size="lg" className="rounded-pill px-4 shadow-sm" onClick={handleSave} disabled={saving}>
                     {saving ? <Spinner size="sm" className="me-2" /> : <FaSave className="me-2" />}
                     Save settings
@@ -220,11 +179,7 @@ const NotificationSettings = () => {
                 </div>
               </>
             ) : (
-<<<<<<< HEAD
               <p className="mb-0 p-4" style={{ color: 'var(--text-secondary)' }}>Could not load settings. Try again later.</p>
-=======
-              <p className="text-muted mb-0 p-4">Could not load settings. Try again later.</p>
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             )}
           </CardBody>
         </Card>

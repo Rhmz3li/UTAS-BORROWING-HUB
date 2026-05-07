@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchNotifications } from '../redux/reducers/notificationReducer.js';
@@ -130,7 +130,6 @@ const Sidebar = () => {
     reports: 'Reports'
   };
 
-<<<<<<< HEAD
   const sidebarPalette = isDark
     ? {
         background: 'linear-gradient(180deg, #0f172a 0%, #111827 100%)',
@@ -159,20 +158,13 @@ const Sidebar = () => {
         dangerHover: 'rgba(255,107,107,0.15)'
       };
 
-=======
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
   return (
     <>
     <div style={{
       width: '280px',
       minHeight: '100vh',
-<<<<<<< HEAD
       background: sidebarPalette.background,
       color: sidebarPalette.text,
-=======
-      background: 'linear-gradient(180deg, #1565c0 0%, #0d47a1 100%)',
-      color: 'white',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
       display: 'flex',
       flexDirection: 'column',
       boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
@@ -184,11 +176,7 @@ const Sidebar = () => {
       {/* Header */}
       <div style={{
         padding: '1.5rem 1rem',
-<<<<<<< HEAD
         borderBottom: sidebarPalette.border
-=======
-        borderBottom: '1px solid rgba(255,255,255,0.1)'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
       }}>
         <div style={{
           display: 'flex',
@@ -202,22 +190,14 @@ const Sidebar = () => {
               fontSize: '1.1rem',
               fontWeight: 'bold',
               lineHeight: '1.3',
-<<<<<<< HEAD
               color: sidebarPalette.text
-=======
-              color: 'white'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             }}>
               UTAS Borrowing Hub
             </h4>
             <p style={{
               margin: '0.25rem 0 0 0',
               fontSize: '0.75rem',
-<<<<<<< HEAD
               color: sidebarPalette.mutedText
-=======
-              color: 'rgba(255,255,255,0.8)'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             }}>
               Management System
             </p>
@@ -229,15 +209,9 @@ const Sidebar = () => {
       <div style={{
         margin: '1rem',
         padding: '1rem',
-<<<<<<< HEAD
         background: sidebarPalette.userCardBg,
         borderRadius: '10px',
         border: sidebarPalette.border
-=======
-        background: 'rgba(0,0,0,0.2)',
-        borderRadius: '10px',
-        border: '1px solid rgba(255,255,255,0.1)'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
       }}>
         <div style={{
           display: 'flex',
@@ -270,11 +244,7 @@ const Sidebar = () => {
             </div>
             <div style={{
               fontSize: '0.75rem',
-              color: 'rgba(255,255,255,0.7)',
-<<<<<<< HEAD
               color: sidebarPalette.mutedText,
-=======
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis'
@@ -303,11 +273,7 @@ const Sidebar = () => {
                   padding: '0.5rem 1rem 0.25rem 1rem',
                   fontSize: '0.7rem',
                   fontWeight: '600',
-<<<<<<< HEAD
                   color: sidebarPalette.subtleText,
-=======
-                  color: 'rgba(255,255,255,0.6)',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
                   marginTop: sectionKey !== 'main' ? '1rem' : '0'
@@ -339,11 +305,7 @@ const Sidebar = () => {
                       borderRadius: '8px',
                       cursor: 'pointer',
                       background: active 
-<<<<<<< HEAD
                         ? sidebarPalette.activeBg 
-=======
-                        ? 'rgba(255,255,255,0.15)' 
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         : hasUnread
                         ? 'rgba(255, 152, 0, 0.15)'
                         : 'transparent',
@@ -356,11 +318,7 @@ const Sidebar = () => {
                       alignItems: 'center',
                       gap: '0.75rem',
                       transition: 'all 0.2s ease',
-<<<<<<< HEAD
                       color: sidebarPalette.text,
-=======
-                      color: 'white',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                       fontWeight: active ? '600' : '400',
                       position: 'relative'
                     }}
@@ -368,11 +326,7 @@ const Sidebar = () => {
                       if (!active) {
                         e.currentTarget.style.background = hasUnread 
                           ? 'rgba(255, 152, 0, 0.2)' 
-<<<<<<< HEAD
                           : sidebarPalette.hoverBg;
-=======
-                          : 'rgba(255,255,255,0.08)';
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                       }
                     }}
                     onMouseLeave={(e) => {
@@ -390,11 +344,7 @@ const Sidebar = () => {
                           ? '#ffc107' 
                           : hasUnread
                           ? '#ff9800'
-<<<<<<< HEAD
                           : sidebarPalette.icon,
-=======
-                          : 'rgba(255,255,255,0.9)',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
                         animation: hasUnread ? 'pulse 2s infinite' : 'none',
                         transition: 'color 0.3s ease'
                       }} />
@@ -464,11 +414,7 @@ const Sidebar = () => {
       {/* Settings at bottom */}
       <div style={{
         padding: '1rem',
-<<<<<<< HEAD
         borderTop: sidebarPalette.border
-=======
-        borderTop: '1px solid rgba(255,255,255,0.1)'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
       }}>
         {/* Theme Toggle */}
         <div
@@ -481,20 +427,12 @@ const Sidebar = () => {
             alignItems: 'center',
             gap: '0.75rem',
             transition: 'all 0.2s ease',
-<<<<<<< HEAD
             color: sidebarPalette.text,
-=======
-            color: 'white',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             background: 'transparent',
             marginBottom: '0.5rem'
           }}
           onMouseEnter={(e) => {
-<<<<<<< HEAD
             e.currentTarget.style.background = sidebarPalette.hoverBg;
-=======
-            e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
@@ -510,19 +448,11 @@ const Sidebar = () => {
             <FaMoon style={{
               fontSize: '1.1rem',
               flexShrink: 0,
-<<<<<<< HEAD
               color: sidebarPalette.icon
             }} />
           )}
           <span style={{ fontSize: '0.9rem' }}>
             Dark Mode and Light Mode
-=======
-              color: 'rgba(255,255,255,0.9)'
-            }} />
-          )}
-          <span style={{ fontSize: '0.9rem' }}>
-            {isDark ? 'Light Mode' : 'Dark Mode'}
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
           </span>
         </div>
         
@@ -536,25 +466,15 @@ const Sidebar = () => {
             alignItems: 'center',
             gap: '0.75rem',
             transition: 'all 0.2s ease',
-<<<<<<< HEAD
             color: sidebarPalette.text,
             background: location.pathname === '/profile' 
               ? sidebarPalette.activeBg 
-=======
-            color: 'white',
-            background: location.pathname === '/profile' 
-              ? 'rgba(255,255,255,0.15)' 
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
               : 'transparent',
             borderLeft: location.pathname === '/profile' ? '4px solid #ffc107' : '4px solid transparent'
           }}
           onMouseEnter={(e) => {
             if (location.pathname !== '/profile') {
-<<<<<<< HEAD
               e.currentTarget.style.background = sidebarPalette.hoverBg;
-=======
-              e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             }
           }}
           onMouseLeave={(e) => {
@@ -568,11 +488,7 @@ const Sidebar = () => {
             flexShrink: 0,
             color: location.pathname === '/profile' 
               ? '#ffc107' 
-<<<<<<< HEAD
               : sidebarPalette.icon
-=======
-              : 'rgba(255,255,255,0.9)'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
           }} />
           <span style={{ fontSize: '0.9rem', fontWeight: location.pathname === '/profile' ? '600' : '400' }}>Profile Settings</span>
         </div>
@@ -593,20 +509,12 @@ const Sidebar = () => {
             alignItems: 'center',
             gap: '0.75rem',
             transition: 'all 0.2s ease',
-<<<<<<< HEAD
             color: sidebarPalette.danger,
-=======
-            color: '#ff6b6b',
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
             background: 'transparent',
             marginTop: '0.5rem'
           }}
           onMouseEnter={(e) => {
-<<<<<<< HEAD
             e.currentTarget.style.background = sidebarPalette.dangerHover;
-=======
-            e.currentTarget.style.background = 'rgba(255,107,107,0.15)';
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
@@ -615,11 +523,7 @@ const Sidebar = () => {
           <FaSignOutAlt style={{
             fontSize: '1.1rem',
             flexShrink: 0,
-<<<<<<< HEAD
             color: sidebarPalette.danger
-=======
-            color: '#ff6b6b'
->>>>>>> 35becb7682d593832e8cb015522800f8b9873185
           }} />
           <span style={{ fontSize: '0.9rem' }}>Logout</span>
         </div>
