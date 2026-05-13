@@ -6,6 +6,7 @@ import { fetchProfile } from "../redux/reducers/authReducer";
 import { FaUser, FaEnvelope, FaPhone, FaBuilding, FaSave, FaSpinner, FaLock, FaEye, FaEyeSlash, FaArrowLeft, FaTimes } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import axios from 'axios';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 
 /** Oman mobile: exactly 8 digits, first digit 7 or 9. When submitRequired, empty is invalid. */
 const validateOmaniPhone = (phone, { submitRequired = false } = {}) => {
@@ -51,6 +52,7 @@ const UNSAVED_CHANGES_BANNER_MS = 90 * 1000;
 const Profile = () => {
     const dispatch = useDispatch();
     const navigate = useNavigate();
+    const { isDark } = useTheme();
     const { user } = useSelector((state) => state.auth);
     const [formData, setFormData] = useState({
         full_name: '',
@@ -81,6 +83,21 @@ const Profile = () => {
     const [fullNameError, setFullNameError] = useState('');
     const [departmentError, setDepartmentError] = useState('');
     const [unsavedChangesDetected, setUnsavedChangesDetected] = useState(false);
+    const profilePalette = isDark
+        ? {
+            pageBg: 'var(--bg-secondary)',
+            title: 'var(--text-primary)',
+            subText: 'var(--text-secondary)',
+            cardBg: 'var(--card-bg)',
+            cardShadow: '0 8px 24px rgba(0,0,0,0.35)'
+        }
+        : {
+            pageBg: 'var(--bg-secondary)',
+            title: 'var(--text-primary)',
+            subText: 'var(--text-secondary)',
+            cardBg: 'var(--card-bg)',
+            cardShadow: '0 8px 24px rgba(0,0,0,0.12)'
+        };
 
     useEffect(() => {
         if (!hasChanges) {
@@ -385,10 +402,10 @@ const Profile = () => {
 
     if (isLoading) {
         return (
-            <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ marginLeft: '280px', minHeight: '100vh', background: profilePalette.pageBg, padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ textAlign: 'center' }}>
                     <FaSpinner className="fa-spin" style={{ fontSize: '3rem', color: '#1976d2', marginBottom: '1rem' }} />
-                    <p style={{ color: '#666', fontSize: '1.1rem' }}>Loading profile...</p>
+                    <p style={{ color: profilePalette.subText, fontSize: '1.1rem' }}>Loading profile...</p>
                 </div>
             </div>
         );
@@ -399,7 +416,7 @@ const Profile = () => {
             marginLeft: '280px',
             padding: '2rem', 
             minHeight: '100vh', 
-            background: 'var(--bg-secondary)',
+            background: profilePalette.pageBg,
             transition: 'all 0.3s ease',
             position: 'relative',
             zIndex: 1,
@@ -408,11 +425,11 @@ const Profile = () => {
             <Container>
                 <Row className="justify-content-center">
                     <Col md={10} lg={8}>
-                        <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', overflow: 'hidden' }}>
-                            <CardBody style={{ padding: '2.5rem' }}>
+                        <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', overflow: 'hidden', backgroundColor: profilePalette.cardBg, boxShadow: profilePalette.cardShadow }}>
+                            <CardBody style={{ padding: '2.5rem', backgroundColor: profilePalette.cardBg }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
                                     <CardTitle tag="h3" className="mb-0" style={{ 
-                                        color: '#2c3e50', 
+                                        color: profilePalette.title, 
                                         fontWeight: 'bold',
                                         display: 'flex',
                                         alignItems: 'center',
@@ -665,9 +682,9 @@ const Profile = () => {
                                                 >
                                                     <option value="">Select your department</option>
                                                     <option value="College of Information Technology">College of Information Technology</option>
-                                                    <option value="College of Engineering and Technology">College of Engineering and Technology</option>
+                                                    <option value="College of Engineering">College of Engineering</option>
                                                     <option value="College of Business Studies">College of Business Studies</option>
-                                                    <option value="College of Education">College of Education</option>
+                                                    <option value="College of Creative Industries">College of Creative Industries</option>
                                                 </Input>
                                                 {departmentError && (
                                                     <div className="text-danger small mt-1">{departmentError}</div>
@@ -878,7 +895,7 @@ const Profile = () => {
 
                                 <Form onSubmit={handlePasswordSubmit}>
                                     <FormGroup>
-                                        <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem' }}>
+                                        <Label style={{ fontWeight: '600', color: profilePalette.title, marginBottom: '0.75rem' }}>
                                             <FaLock className="me-2" style={{ color: '#667eea' }} />
                                             Current Password {user?.role === 'Admin' ? '(Optional)' : '*'}
                                         </Label>
@@ -891,10 +908,12 @@ const Profile = () => {
                                                 required={user?.role !== 'Admin'}
                                                 placeholder={user?.role === 'Admin' ? 'Leave blank if setting password for the first time' : 'Enter current password'}
                                                 style={{
-                                                    border: passwordErrors.currentPassword ? '2px solid #f44336' : '2px solid #e0e0e0',
+                                                    border: passwordErrors.currentPassword ? '2px solid #f44336' : '2px solid var(--input-border)',
                                                     borderRadius: '10px',
                                                     padding: '0.75rem 3rem 0.75rem 0.75rem',
-                                                    fontSize: '1rem'
+                                                    fontSize: '1rem',
+                                                    backgroundColor: 'var(--input-bg)',
+                                                    color: 'var(--text-primary)'
                                                 }}
                                             />
                                             <Button
@@ -907,7 +926,7 @@ const Profile = () => {
                                                     transform: 'translateY(-50%)',
                                                     background: 'transparent',
                                                     border: 'none',
-                                                    color: '#666',
+                                                    color: 'var(--text-secondary)',
                                                     padding: '0.5rem'
                                                 }}
                                             >
@@ -920,14 +939,14 @@ const Profile = () => {
                                             </small>
                                         )}
                                         {user?.role === 'Admin' && (
-                                            <small style={{ color: '#666', marginTop: '0.25rem', display: 'block', fontStyle: 'italic' }}>
+                                            <small style={{ color: 'var(--text-secondary)', marginTop: '0.25rem', display: 'block', fontStyle: 'italic' }}>
                                                 Leave blank if you don't have a password set yet
                                             </small>
                                         )}
                                     </FormGroup>
 
                                     <FormGroup>
-                                        <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem' }}>
+                                        <Label style={{ fontWeight: '600', color: profilePalette.title, marginBottom: '0.75rem' }}>
                                             <FaLock className="me-2" style={{ color: '#667eea' }} />New Password *
                                         </Label>
                                         <div style={{ position: 'relative' }}>
@@ -938,10 +957,12 @@ const Profile = () => {
                                                 onChange={handlePasswordChange}
                                                 required
                                                 style={{
-                                                    border: passwordErrors.newPassword ? '2px solid #f44336' : '2px solid #e0e0e0',
+                                                    border: passwordErrors.newPassword ? '2px solid #f44336' : '2px solid var(--input-border)',
                                                     borderRadius: '10px',
                                                     padding: '0.75rem 3rem 0.75rem 0.75rem',
-                                                    fontSize: '1rem'
+                                                    fontSize: '1rem',
+                                                    backgroundColor: 'var(--input-bg)',
+                                                    color: 'var(--text-primary)'
                                                 }}
                                             />
                                             <Button
@@ -954,7 +975,7 @@ const Profile = () => {
                                                     transform: 'translateY(-50%)',
                                                     background: 'transparent',
                                                     border: 'none',
-                                                    color: '#666',
+                                                    color: 'var(--text-secondary)',
                                                     padding: '0.5rem'
                                                 }}
                                             >
@@ -969,7 +990,7 @@ const Profile = () => {
                                     </FormGroup>
 
                                     <FormGroup>
-                                        <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem' }}>
+                                        <Label style={{ fontWeight: '600', color: profilePalette.title, marginBottom: '0.75rem' }}>
                                             <FaLock className="me-2" style={{ color: '#667eea' }} />Confirm New Password *
                                         </Label>
                                         <div style={{ position: 'relative' }}>
@@ -980,10 +1001,12 @@ const Profile = () => {
                                                 onChange={handlePasswordChange}
                                                 required
                                                 style={{
-                                                    border: passwordErrors.confirmPassword ? '2px solid #f44336' : '2px solid #e0e0e0',
+                                                    border: passwordErrors.confirmPassword ? '2px solid #f44336' : '2px solid var(--input-border)',
                                                     borderRadius: '10px',
                                                     padding: '0.75rem 3rem 0.75rem 0.75rem',
-                                                    fontSize: '1rem'
+                                                    fontSize: '1rem',
+                                                    backgroundColor: 'var(--input-bg)',
+                                                    color: 'var(--text-primary)'
                                                 }}
                                             />
                                             <Button
@@ -996,7 +1019,7 @@ const Profile = () => {
                                                     transform: 'translateY(-50%)',
                                                     background: 'transparent',
                                                     border: 'none',
-                                                    color: '#666',
+                                                    color: 'var(--text-secondary)',
                                                     padding: '0.5rem'
                                                 }}
                                             >
@@ -1030,8 +1053,8 @@ const Profile = () => {
                                         setPasswordErrors({});
                                     }}
                                     style={{
-                                        background: '#f5f5f5',
-                                        color: '#666',
+                                        background: 'var(--bg-tertiary)',
+                                        color: 'var(--text-primary)',
                                         border: 'none',
                                         borderRadius: '10px',
                                         padding: '0.75rem 1.5rem',

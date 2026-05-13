@@ -10,13 +10,33 @@ import {
 } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.auth);
+  const { isDark } = useTheme();
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const dashboardPalette = isDark
+    ? {
+        pageBg: 'var(--bg-secondary)',
+        cardBg: 'var(--card-bg)',
+        textPrimary: 'var(--text-primary)',
+        textSecondary: 'var(--text-secondary)',
+        cardShadow: '0 4px 14px rgba(0,0,0,0.35)',
+        hoverShadow: '0 10px 22px rgba(0,0,0,0.45)'
+      }
+    : {
+        pageBg: 'var(--bg-secondary)',
+        cardBg: 'var(--card-bg)',
+        textPrimary: 'var(--text-primary)',
+        textSecondary: 'var(--text-secondary)',
+        cardShadow: '0 2px 6px rgba(0,0,0,0.1)',
+        hoverShadow: '0 8px 16px rgba(0,0,0,0.15)'
+      };
 
   useEffect(() => {
     // Check if user is Admin or Assistant
@@ -54,7 +74,7 @@ const AdminDashboard = () => {
 
   if (loading) {
     return (
-      <Container fluid className="py-5" style={{ background: '#f5f5f5', minHeight: '100vh' }}>
+      <Container fluid className="py-5" style={{ background: dashboardPalette.pageBg, minHeight: '100vh' }}>
         <div className="text-center">
           <div className="spinner-border text-primary" role="status">
             <span className="visually-hidden">Loading...</span>
@@ -154,7 +174,7 @@ const AdminDashboard = () => {
       marginLeft: '280px',
       padding: '2rem', 
       minHeight: '100vh', 
-      background: '#f5f5f5'
+      background: dashboardPalette.pageBg
     }}>
       <Container fluid>
         {/* Header */}
@@ -164,19 +184,19 @@ const AdminDashboard = () => {
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center',
-            background: 'white',
+            background: dashboardPalette.cardBg,
             padding: '1.5rem',
             borderRadius: '12px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+            boxShadow: dashboardPalette.cardShadow
           }}>
             <div>
-              <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+              <h2 style={{ color: dashboardPalette.textPrimary, fontWeight: 'bold', marginBottom: '0.25rem' }}>
                 Control Panel
               </h2>
-              <p style={{ color: '#666', margin: 0, fontSize: '0.95rem' }}>
+              <p style={{ color: dashboardPalette.textSecondary, margin: 0, fontSize: '0.95rem' }}>
                 Welcome to the UTAS Borrowing Hub Management System
               </p>
-              <p style={{ color: '#999', margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+              <p style={{ color: dashboardPalette.textSecondary, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
                 University of Technology and Applied Sciences
               </p>
             </div>
@@ -196,23 +216,25 @@ const AdminDashboard = () => {
                   borderRadius: '12px', 
                   cursor: 'pointer', 
                   transition: 'all 0.3s ease',
-                  borderLeft: `4px solid ${stat.color}`
+                  borderLeft: `4px solid ${stat.color}`,
+                  backgroundColor: dashboardPalette.cardBg,
+                  boxShadow: dashboardPalette.cardShadow
                 }}
                 onClick={() => navigate(stat.path)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+                  e.currentTarget.style.boxShadow = dashboardPalette.hoverShadow;
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                  e.currentTarget.style.boxShadow = dashboardPalette.cardShadow;
                 }}
               >
                 <CardBody className="p-4">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ 
-                        color: '#666', 
+                        color: dashboardPalette.textSecondary, 
                         fontSize: '0.875rem', 
                         margin: 0, 
                         marginBottom: '0.5rem',
@@ -253,16 +275,16 @@ const AdminDashboard = () => {
       <Row className="g-3 mb-4">
         {/* Bar Chart - Borrow Status */}
         <Col md={6}>
-          <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%' }}>
+          <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%', backgroundColor: dashboardPalette.cardBg }}>
             <CardBody className="p-4">
-              <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: '#333' }}>
+              <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: dashboardPalette.textPrimary }}>
                 Borrow Status Overview
               </CardTitle>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={borrowStatusData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#3b3b3b' : '#e5e7eb'} />
+                  <XAxis dataKey="name" tick={{ fill: dashboardPalette.textSecondary }} />
+                  <YAxis tick={{ fill: dashboardPalette.textSecondary }} />
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="value" fill="#1976d2" radius={[8, 8, 0, 0]}>
@@ -278,9 +300,9 @@ const AdminDashboard = () => {
 
         {/* Pie/Donut Chart - Resource Status */}
         <Col md={6}>
-          <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%' }}>
+          <Card className="border-0 shadow-sm" style={{ borderRadius: '12px', height: '100%', backgroundColor: dashboardPalette.cardBg }}>
             <CardBody className="p-4">
-              <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: '#333' }}>
+              <CardTitle tag="h5" style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: dashboardPalette.textPrimary }}>
                 Resource Status Distribution
               </CardTitle>
               <ResponsiveContainer width="100%" height={300}>
@@ -348,23 +370,25 @@ const AdminDashboard = () => {
                   borderRadius: '12px', 
                   cursor: 'pointer', 
                   transition: 'all 0.3s ease',
-                  borderTop: `4px solid ${stat.color}`
+                  borderTop: `4px solid ${stat.color}`,
+                  backgroundColor: dashboardPalette.cardBg,
+                  boxShadow: dashboardPalette.cardShadow
                 }}
                 onClick={() => navigate(stat.path)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+                  e.currentTarget.style.boxShadow = dashboardPalette.hoverShadow;
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                  e.currentTarget.style.boxShadow = dashboardPalette.cardShadow;
                 }}
               >
                 <CardBody className="p-3">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ 
-                        color: '#666', 
+                        color: dashboardPalette.textSecondary, 
                         fontSize: '0.8rem', 
                         margin: 0, 
                         marginBottom: '0.25rem',
@@ -373,7 +397,7 @@ const AdminDashboard = () => {
                         {stat.title}
                       </p>
                       <h4 style={{ 
-                        color: '#333', 
+                        color: dashboardPalette.textPrimary, 
                         fontSize: '1.5rem', 
                         fontWeight: 'bold', 
                         margin: 0 

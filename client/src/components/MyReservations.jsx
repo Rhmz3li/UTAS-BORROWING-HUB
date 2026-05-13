@@ -49,7 +49,7 @@ const MyReservations = () => {
             'Cancelled': { bg: '#ffebee', color: '#f44336', icon: FaTimes },
             'Expired': { bg: '#fce4ec', color: '#e91e63', icon: FaExclamationTriangle }
         };
-        const style = colors[actualStatus] || { bg: '#f5f5f5', color: '#666', icon: FaInfoCircle };
+        const style = colors[actualStatus] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)', icon: FaInfoCircle };
         const Icon = style.icon;
         
         return (
@@ -72,7 +72,7 @@ const MyReservations = () => {
     };
 
     return (
-        <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
+        <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
             <Container fluid className="py-4">
             <Row className="mb-4">
                 <Col>
@@ -81,7 +81,7 @@ const MyReservations = () => {
                             <Button
                                 onClick={() => navigate('/home')}
                                 style={{
-                                    background: '#fff',
+                                    background: 'var(--card-bg)',
                                     color: '#667eea',
                                     border: '2px solid #667eea',
                                     borderRadius: '10px',
@@ -92,10 +92,10 @@ const MyReservations = () => {
                             >
                                 <FaArrowLeft className="me-2" />Back
                             </Button>
-                            <h2 style={{ color: '#2c3e50', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                            <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.25rem' }}>
                                 My Reservations
                             </h2>
-                            <p style={{ color: '#666', margin: 0 }}>
+                            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
                                 View and manage your resource reservations
                             </p>
                         </div>
@@ -106,17 +106,19 @@ const MyReservations = () => {
             {/* Filter */}
             <Row className="mb-4">
                 <Col md={4}>
-                    <Card className="border-0 shadow-sm">
+                    <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
                         <CardBody className="p-3">
                             <select
                                 value={filter}
                                 onChange={(e) => setFilter(e.target.value)}
                                 style={{
                                     width: '100%',
-                                    border: '2px solid #e0e0e0',
+                                    border: '2px solid var(--input-border)',
                                     borderRadius: '10px',
                                     padding: '0.75rem',
                                     fontSize: '1rem',
+                                    backgroundColor: 'var(--input-bg)',
+                                    color: 'var(--text-primary)',
                                     cursor: 'pointer'
                                 }}
                             >
@@ -137,22 +139,22 @@ const MyReservations = () => {
                     <p className="mt-3">Loading reservations...</p>
                 </div>
             ) : (
-                <Card className="border-0 shadow-lg" style={{ borderRadius: '20px' }}>
-                    <CardBody style={{ padding: '1.5rem' }}>
-                        <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: '#2c3e50' }}>
+                <Card className="border-0 shadow-lg" style={{ borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
+                    <CardBody style={{ padding: '1.5rem', backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)' }}>
+                        <CardTitle tag="h5" style={{ fontWeight: 'bold', marginBottom: '1.5rem', color: 'var(--text-primary)' }}>
                             Reservation History
                         </CardTitle>
                         {filteredReservations.length > 0 ? (
                             <div className="table-responsive">
-                                <Table hover style={{ margin: 0 }}>
-                                    <thead style={{ background: '#f8f9fa' }}>
+                                <Table hover style={{ margin: 0, color: 'var(--text-primary)', backgroundColor: 'var(--card-bg)' }}>
+                                    <thead style={{ background: 'var(--bg-tertiary)' }}>
                                         <tr>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Resource</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Reservation Date</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Pickup Date</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Expiry Date</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
-                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Actions</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Resource</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Reservation Date</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Pickup Date</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Expiry Date</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Status</th>
+                                            <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -164,23 +166,23 @@ const MyReservations = () => {
                                             return (
                                                 <tr 
                                                     key={reservation._id}
-                                                    style={isExpired ? { background: '#fff3e0' } : {}}
+                                                    style={isExpired ? { background: 'rgba(255, 152, 0, 0.12)' } : {}}
                                                 >
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div>
                                                             <FaCalendarCheck className="me-2" style={{ color: '#4facfe' }} />
-                                                            <strong style={{ color: '#333' }}>
+                                                            <strong style={{ color: 'var(--text-primary)' }}>
                                                                 {reservation.resource_id?.name || 'Unknown'}
                                                             </strong>
                                                             {reservation.resource_id?.category && (
-                                                                <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                                                                     {reservation.resource_id.category}
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                                                        <span style={{ color: '#666' }}>
+                                                        <span style={{ color: 'var(--text-secondary)' }}>
                                                             {reservation.reservation_date ? new Date(reservation.reservation_date).toLocaleDateString('en-US', {
                                                                 year: 'numeric',
                                                                 month: 'short',
@@ -189,7 +191,7 @@ const MyReservations = () => {
                                                         </span>
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                                                        <span style={{ color: '#666', fontWeight: '600' }}>
+                                                        <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>
                                                             {reservation.pickup_date ? new Date(reservation.pickup_date).toLocaleDateString('en-US', {
                                                                 year: 'numeric',
                                                                 month: 'short',
@@ -199,7 +201,7 @@ const MyReservations = () => {
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                            <span style={{ color: isExpired ? '#f44336' : '#666' }}>
+                                                            <span style={{ color: isExpired ? '#f44336' : 'var(--text-secondary)' }}>
                                                                 {reservation.expiry_date ? new Date(reservation.expiry_date).toLocaleDateString('en-US', {
                                                                     year: 'numeric',
                                                                     month: 'short',
@@ -211,6 +213,11 @@ const MyReservations = () => {
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         {getStatusBadge(reservation.status, reservation.expiry_date)}
+                                                        {reservation.requires_payment && (reservation.payment_amount || 0) > 0 && (
+                                                            <div style={{ fontSize: '0.8rem', color: reservation.payment_status === 'Paid' ? '#2e7d32' : '#ff9800', marginTop: '0.35rem' }}>
+                                                                Deposit: {reservation.payment_status === 'Paid' ? 'Paid' : 'Pending'}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                                                         {['Pending', 'Confirmed'].includes(reservation.status) && (
@@ -233,6 +240,12 @@ const MyReservations = () => {
                                                                 Waiting for admin approval to convert to borrow
                                                             </Alert>
                                                         )}
+                                                        {reservation.status === 'Pending' && reservation.requires_payment && (reservation.payment_amount || 0) > 0 && reservation.payment_status !== 'Paid' && (
+                                                            <Alert color="warning" className="mt-2 mb-0" style={{ fontSize: '0.85rem', padding: '0.5rem' }}>
+                                                                <FaInfoCircle className="me-1" />
+                                                                Complete your payment from the Payments page so the admin can review this reservation.
+                                                            </Alert>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             );
@@ -243,8 +256,8 @@ const MyReservations = () => {
                         ) : (
                             <div className="text-center py-5">
                                 <FaCalendarCheck size={64} style={{ color: '#ccc', marginBottom: '1rem' }} />
-                                <h5 style={{ color: '#666', marginBottom: '0.5rem' }}>No Reservations Found</h5>
-                                <p style={{ color: '#999' }}>
+                                <h5 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Reservations Found</h5>
+                                <p style={{ color: 'var(--text-secondary)' }}>
                                     {filter === 'all' 
                                         ? "You don't have any reservations yet."
                                         : `No ${filter.toLowerCase()} reservations found.`}

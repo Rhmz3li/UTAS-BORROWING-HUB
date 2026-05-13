@@ -503,7 +503,7 @@ const AdminReports = () => {
               textAlign: 'center', 
               fontWeight: 'bold', 
               padding: '0.5rem',
-              color: '#666'
+              color: 'var(--text-secondary)'
             }}>
               {day}
             </div>
@@ -519,23 +519,23 @@ const AdminReports = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: day ? 'pointer' : 'default',
-                background: isSelectedDate(day) ? '#1976d2' : day ? '#f5f5f5' : 'transparent',
-                color: isSelectedDate(day) ? '#fff' : '#333',
+                background: isSelectedDate(day) ? '#1976d2' : day ? 'var(--bg-tertiary)' : 'transparent',
+                color: isSelectedDate(day) ? '#fff' : 'var(--text-primary)',
                 borderRadius: '8px',
-                border: isSelectedDate(day) ? '2px solid #1976d2' : '1px solid #e0e0e0',
+                border: isSelectedDate(day) ? '2px solid #1976d2' : '1px solid var(--border-color)',
                 fontWeight: isSelectedDate(day) ? 'bold' : 'normal',
                 transition: 'all 0.2s ease',
                 position: 'relative'
               }}
               onMouseEnter={(e) => {
                 if (day) {
-                  e.currentTarget.style.background = isSelectedDate(day) ? '#1976d2' : '#e3f2fd';
+                  e.currentTarget.style.background = isSelectedDate(day) ? '#1976d2' : 'rgba(25, 118, 210, 0.22)';
                   e.currentTarget.style.transform = 'scale(1.05)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (day) {
-                  e.currentTarget.style.background = isSelectedDate(day) ? '#1976d2' : '#f5f5f5';
+                  e.currentTarget.style.background = isSelectedDate(day) ? '#1976d2' : 'var(--bg-tertiary)';
                   e.currentTarget.style.transform = 'scale(1)';
                 }
               }}
@@ -564,7 +564,7 @@ const AdminReports = () => {
 
   if (loading) {
     return (
-      <Container fluid className="py-5" style={{ background: '#f5f5f5', minHeight: '100vh' }}>
+      <Container fluid className="py-5" style={{ marginLeft: '280px', background: 'var(--bg-secondary)', minHeight: '100vh' }}>
         <div className="text-center">
           <div className="spinner-border text-primary" role="status">
             <span className="visually-hidden">Loading...</span>
@@ -575,17 +575,17 @@ const AdminReports = () => {
   }
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       {/* Header */}
       <Row className="mb-4">
         <Col>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+              <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.25rem' }}>
                 Reports & Analytics
               </h2>
-              <p style={{ color: '#666', margin: 0, fontSize: '0.95rem' }}>
+              <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.95rem' }}>
                 Comprehensive insights and system management
               </p>
             </div>
@@ -616,7 +616,7 @@ const AdminReports = () => {
       {/* Tabs */}
       <Row className="mb-4">
         <Col>
-          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '2px solid #e0e0e0' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '2px solid var(--border-color)' }}>
             {[
               { id: 'analytics', label: 'Analytics', icon: FaChartBar },
               { id: 'calendar', label: 'Calendar', icon: FaCalendarAlt },
@@ -630,7 +630,7 @@ const AdminReports = () => {
                   onClick={() => setActiveTab(tab.id)}
                   style={{
                     background: activeTab === tab.id ? '#1976d2' : 'transparent',
-                    color: activeTab === tab.id ? '#fff' : '#666',
+                    color: activeTab === tab.id ? '#fff' : 'var(--text-secondary)',
                     border: 'none',
                     borderRadius: '8px 8px 0 0',
                     padding: '0.75rem 1.5rem',
@@ -846,8 +846,8 @@ const AdminReports = () => {
                     <CardBody>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                          <p style={{ color: '#666', margin: 0, fontSize: '0.875rem' }}>{metric.label}</p>
-                          <h3 style={{ color: '#333', margin: '0.5rem 0 0 0', fontWeight: 'bold' }}>{metric.value}</h3>
+                          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.875rem' }}>{metric.label}</p>
+                          <h3 style={{ color: 'var(--text-primary)', margin: '0.5rem 0 0 0', fontWeight: 'bold' }}>{metric.value}</h3>
                         </div>
                         <Icon style={{ fontSize: '2rem', color: metric.color }} />
                       </div>
@@ -1013,18 +1013,19 @@ const AdminReports = () => {
                       <div key={idx} style={{
                         padding: '0.75rem',
                         marginBottom: '0.5rem',
-                        background: '#f5f5f5',
-                        borderRadius: '8px'
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
                       }}>
-                        <strong>{event.title}</strong>
-                        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: '#666' }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>{event.title}</strong>
+                        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                           {event.description}
                         </p>
-                        <small style={{ color: '#999' }}>{event.time}</small>
+                        <small style={{ color: 'var(--text-tertiary)' }}>{event.time}</small>
                       </div>
                     ))
                   ) : (
-                    <p style={{ color: '#666', textAlign: 'center' }}>No events for this date</p>
+                    <p style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>No events for this date</p>
                   )}
                 </div>
               </CardBody>
@@ -1164,7 +1165,7 @@ const AdminReports = () => {
                             {announcement.title}
                           </h6>
                           <p style={{ margin: 0 }}>{announcement.message}</p>
-                          <small style={{ color: '#666', marginTop: '0.5rem', display: 'block' }}>
+                          <small style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', display: 'block' }}>
                             Target: {announcement.target_audience} | 
                             Created: {new Date(announcement.created_at).toLocaleDateString()}
                           </small>
@@ -1174,7 +1175,7 @@ const AdminReports = () => {
                     </Alert>
                   ))
                 ) : (
-                  <p style={{ color: '#666', textAlign: 'center' }}>No announcements yet</p>
+                  <p style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>No announcements yet</p>
                 )}
               </CardBody>
             </Card>

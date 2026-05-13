@@ -223,7 +223,7 @@ const AdminUsers = () => {
       'Inactive': { bg: '#fff3e0', color: '#ff9800' },
       'Suspended': { bg: '#ffebee', color: '#f44336' }
     };
-    const style = colors[status] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[status] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
     return (
       <Badge style={{
@@ -240,16 +240,16 @@ const AdminUsers = () => {
   };
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       <Row className="mb-4">
         <Col>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+              <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.5rem' }}>
                 Users Management
               </h2>
-              <p style={{ color: '#666', margin: 0 }}>
+              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
                 Manage all users: view details, update status and roles
               </p>
             </div>
@@ -326,9 +326,9 @@ const AdminUsers = () => {
           <div style={{ 
             padding: '0.5rem', 
             textAlign: 'center', 
-            background: '#fff', 
+            background: 'var(--card-bg)', 
             borderRadius: '8px',
-            border: '1px solid #e0e0e0'
+            border: '1px solid var(--border-color)'
           }}>
             <strong style={{ color: '#1976d2' }}>{total}</strong> Total
           </div>
@@ -336,8 +336,8 @@ const AdminUsers = () => {
       </Row>
 
       {/* Users Table */}
-      <Card className="border-0 shadow-sm">
-        <CardBody className="p-0">
+      <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
+        <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)' }}>
           {loading ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status">
@@ -347,20 +347,20 @@ const AdminUsers = () => {
           ) : users.length === 0 ? (
             <div className="text-center py-5">
               <FaUserCheck style={{ fontSize: '3rem', color: '#ccc', marginBottom: '1rem' }} />
-              <p style={{ color: '#666' }}>No users found</p>
+              <p style={{ color: 'var(--text-secondary)' }}>No users found</p>
             </div>
           ) : (
             <div className="table-responsive">
               <Table hover style={{ margin: 0 }}>
-                <thead style={{ background: '#f8f9fa' }}>
+                <thead style={{ background: 'var(--bg-tertiary)' }}>
                   <tr>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>User</th>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Email</th>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Role</th>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>ID</th>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Department</th>
-                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', textAlign: 'center' }}>Actions</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>User</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Email</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Role</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Status</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>ID</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', color: 'var(--text-primary)' }}>Department</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600', textAlign: 'center', color: 'var(--text-primary)' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -384,9 +384,9 @@ const AdminUsers = () => {
                               <RoleIcon />
                             </div>
                             <div>
-                              <strong style={{ color: '#333' }}>{user.full_name}</strong>
+                              <strong style={{ color: 'var(--text-primary)' }}>{user.full_name}</strong>
                               {user.phone && (
-                                <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                   {user.phone}
                                 </div>
                               )}
@@ -394,7 +394,7 @@ const AdminUsers = () => {
                           </div>
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                          <span style={{ color: '#666' }}>{user.email}</span>
+                          <span style={{ color: 'var(--text-secondary)' }}>{user.email}</span>
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                           <Badge style={{
@@ -412,7 +412,7 @@ const AdminUsers = () => {
                           {getStatusBadge(user.status)}
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                          <span style={{ color: '#666' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>
                             {user.role === 'Student' 
                               ? (user.student_id || user.identification_id || 'N/A')
                               : (user.employee_id || user.identification_id || user.student_id || 'N/A')
@@ -420,7 +420,7 @@ const AdminUsers = () => {
                           </span>
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                          <span style={{ color: '#666' }}>{user.department || 'N/A'}</span>
+                          <span style={{ color: 'var(--text-secondary)' }}>{user.department || 'N/A'}</span>
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
@@ -488,7 +488,7 @@ const AdminUsers = () => {
               >
                 Previous
               </Button>
-              <span style={{ padding: '0.5rem 1rem', background: '#fff', borderRadius: '8px' }}>
+              <span style={{ padding: '0.5rem 1rem', background: 'var(--card-bg)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
                 Page {currentPage} of {totalPages}
               </span>
               <Button
@@ -823,10 +823,11 @@ const AdminUsers = () => {
               <div className="mt-3">
                 <p>Are you sure you want to delete this user?</p>
                 <div style={{ 
-                  background: '#f5f5f5', 
+                  background: 'var(--bg-tertiary)', 
                   padding: '1rem', 
                   borderRadius: '8px',
-                  marginTop: '1rem'
+                  marginTop: '1rem',
+                  color: 'var(--text-primary)'
                 }}>
                   <p style={{ margin: 0, marginBottom: '0.5rem' }}>
                     <strong>Name:</strong> {selectedUser.full_name}

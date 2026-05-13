@@ -111,15 +111,7 @@ const logPasswordResetEvent = (event, details) => {
     console.log(`[PASSWORD_RESET_LOG] ${JSON.stringify(logEntry)}`);
 };
 
-const conStr = "mongodb+srv://admin123:admin123@utas-borrowing-hub.qlzohvg.mongodb.net/UTAS-BORROWING-HUB?retryWrites=true&w=majority&appName=UTAS-BORROWING-HUB";
-mongoose
-  .connect(conStr)
-  .then(() => {
-    console.log("Connected to MongoDB successfully!");
-  })
-  .catch((error) => {
-    console.error("MongoDB connection error:", error);
-  });
+// Mongo connection is established in startServer() after dotenv loads — see end of file.
 
 // ==================== AUTH ROUTES ====================
 
@@ -1525,6 +1517,12 @@ app.post("/borrow/checkout", async (req, res) => {
                     message: 'Payment method is required for this resource' 
                 });
             }
+            if (!['Cash', 'Card'].includes(payment_method)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Only Cash or Card payment methods are allowed'
+                });
+            }
             
             // Create payment record
             const newPayment = new PaymentModel({
@@ -2038,6 +2036,12 @@ app.post("/reservations", async (req, res) => {
                     message: 'Payment method is required for this resource' 
                 });
             }
+            if (!['Cash', 'Card'].includes(payment_method)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Only Cash or Card payment methods are allowed'
+                });
+            }
             
             // Create payment record
             const newPayment = new PaymentModel({
@@ -2368,16 +2372,20 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
         }
         await resource.save();
 
+        const paymentRequiredAfterConfirmation = reservation.requires_payment && reservation.payment_amount > 0;
+
         // Send notification to user (respect notification preferences)
         const resUserId = reservation.user_id?._id || reservation.user_id;
         if (resUserId && (await shouldSendInAppNotification(resUserId, 'reservationConfirmation'))) {
             await NotificationModel.create({
                 user_id: resUserId,
-                title: 'Reservation Confirmed',
-                message: `Your reservation for "${resource.name}" has been confirmed. Please pick it up on ${pickupDate.toLocaleDateString()} from ${resource.location || 'IT Borrowing Hub - Lab 2'}. The resource is now reserved for you.`,
+                title: paymentRequiredAfterConfirmation ? 'Reservation Confirmed - Payment Required' : 'Reservation Confirmed',
+                message: paymentRequiredAfterConfirmation
+                    ? `Your reservation for "${resource.name}" is confirmed. Please pay the security deposit (${reservation.payment_amount} OMR) in the Payments page before final borrow approval.`
+                    : `Your reservation for "${resource.name}" has been confirmed. Please pick it up on ${pickupDate.toLocaleDateString()} from ${resource.location || 'IT Borrowing Hub - Lab 2'}. The resource is now reserved for you.`,
                 type: 'Success',
-                related_type: 'Reservation',
-                related_id: reservation._id
+                related_type: paymentRequiredAfterConfirmation ? 'Payment' : 'Reservation',
+                related_id: paymentRequiredAfterConfirmation ? (reservation.payment_id || reservation._id) : reservation._id
             });
         }
 
@@ -2396,7 +2404,10 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
                       <tr><td style="padding:6px;color:#555;">Pickup Date</td><td style="padding:6px;">${pickupDate.toLocaleDateString()}</td></tr>
                       <tr><td style="padding:6px;color:#555;">Pickup Location</td><td style="padding:6px;">${resource.location || 'IT Borrowing Hub - Lab 2'}</td></tr>
                     </table>
-                    <p>Please pick up your reservation on time.</p>
+                    ${paymentRequiredAfterConfirmation
+                        ? `<p style="margin:12px 0;color:#c62828;"><strong>Action required:</strong> Please pay the security deposit of ${reservation.payment_amount} OMR from your Payments page. Your reservation will only be converted to an active borrow after payment confirmation by admin.</p>`
+                        : `<p>Please pick up your reservation on time.</p>`
+                    }
                   </div>${emailFooter}</div>`
             });
         }
@@ -2494,6 +2505,25 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
             });
         }
 
+        // If reservation requires a security deposit, ensure payment is completed before conversion
+        if (reservation.requires_payment && reservation.payment_amount > 0) {
+            if (!reservation.payment_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot approve reservation. Security deposit payment record not found.'
+                });
+            }
+
+            const reservationPayment = await PaymentModel.findById(reservation.payment_id);
+            if (!reservationPayment || reservationPayment.status !== 'Completed') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot approve reservation. Security deposit has not been confirmed yet. Please confirm the payment in Payments Management first.',
+                    depositStatus: reservationPayment ? reservationPayment.status : 'Missing'
+                });
+            }
+        }
+
         // Create borrow record
         const borrowDate = new Date(reservation.pickup_date);
         const finalDueDate = due_date ? new Date(due_date) : new Date(borrowDate);
@@ -2510,7 +2540,12 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
             checked_out_by: admin._id,
             status: 'Active',
             terms_accepted: true,
-            terms_accepted_at: reservationUser.terms_accepted_at || new Date()
+            terms_accepted_at: reservationUser.terms_accepted_at || new Date(),
+            requires_payment: reservation.requires_payment || false,
+            payment_amount: reservation.requires_payment ? reservation.payment_amount : 0,
+            payment_method: reservation.requires_payment ? reservation.payment_method : null,
+            payment_status: reservation.requires_payment ? 'Paid' : 'Not Required',
+            payment_id: reservation.payment_id || null
         });
         await newBorrow.save();
 
@@ -2523,6 +2558,9 @@ app.post("/admin/reservations/:id/approve-borrow", async (req, res) => {
 
         // Update reservation status
         reservation.status = 'Completed';
+        if (reservation.requires_payment) {
+            reservation.payment_status = 'Paid';
+        }
         reservation.updated_at = new Date();
         await reservation.save();
 
@@ -3892,6 +3930,11 @@ app.get("/admin/borrows/overdue", async (req, res) => {
  */
 async function runOverdueBorrowCheck() {
     try {
+        if (mongoose.connection.readyState !== mongoose.STATES.connected) {
+            console.warn('Skipping overdue borrow check: MongoDB is not connected.');
+            return;
+        }
+
         const now = new Date();
 
         const borrows = await BorrowModel.find({
@@ -4933,30 +4976,70 @@ app.get("/health", (req, res) => {
 // ==================== START SERVER ====================
 
 const PORT = process.env.PORT || 5000;
+const MONGO_CONNECT_TIMEOUT_MS = Number(process.env.MONGO_CONNECT_TIMEOUT_MS || 10000);
 
-const server = app.listen(PORT, () => {
-    console.log(`Server started at ${PORT}..`);
-    // Run overdue check once on startup, then every hour
-    runOverdueBorrowCheck().catch((err) => {
-        console.error('Initial overdue borrow check failed:', err);
-    });
-    setInterval(() => {
-        runOverdueBorrowCheck().catch((err) => {
-            console.error('Scheduled overdue borrow check failed:', err);
-        });
-    }, 60 * 60 * 1000);
-}).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.error(`\n❌ Error: Port ${PORT} is already in use.`);
-        console.error(`Please either:`);
-        console.error(`  1. Stop the process using port ${PORT}`);
-        console.error(`  2. Or set a different PORT in your .env file (e.g., PORT=5001)`);
-        console.error(`\nTo find the process using port ${PORT}, run:`);
-        console.error(`  Windows: netstat -ano | findstr :${PORT}`);
-        console.error(`  Linux/Mac: lsof -i :${PORT}\n`);
-        process.exit(1);
-    } else {
-        console.error('Server error:', err);
+async function connectMongoOrExit() {
+    const mongoUri =
+        (process.env.MONGODB_URI && process.env.MONGODB_URI.trim()) ||
+        (process.env.MONGO_URI && process.env.MONGO_URI.trim());
+
+    if (!mongoUri) {
+        console.error('\n❌ Missing MongoDB connection string.');
+        console.error(
+            'Set MONGODB_URI (or MONGO_URI) in server/.env — e.g. Atlas mongodb+srv://... or mongodb://...'
+        );
         process.exit(1);
     }
+
+    mongoose.set('bufferCommands', false);
+
+    try {
+        await mongoose.connect(mongoUri, {
+            serverSelectionTimeoutMS: MONGO_CONNECT_TIMEOUT_MS
+        });
+        console.log('Connected to MongoDB successfully.');
+    } catch (err) {
+        console.error('\n❌ Cannot connect to MongoDB. The API will not start.');
+        console.error(`   URI host starts with: ${mongoUri.replace(/^[^:]+:[^@]+@/, '***:***@').slice(0, 80)}…`);
+        console.error(`   ${err.message}`);
+        console.error(
+            '\nIf you see DNS or ECONNREFUSED errors, check your network/firewall, Atlas IP allow list, and that the URI is correct.'
+        );
+        process.exit(1);
+    }
+}
+
+async function startServer() {
+    await connectMongoOrExit();
+
+    app.listen(PORT, () => {
+        console.log(`Server started at ${PORT}..`);
+        runOverdueBorrowCheck().catch((err) => {
+            console.error('Initial overdue borrow check failed:', err);
+        });
+        setInterval(() => {
+            runOverdueBorrowCheck().catch((err) => {
+                console.error('Scheduled overdue borrow check failed:', err);
+            });
+        }, 60 * 60 * 1000);
+    }).on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`\n❌ Error: Port ${PORT} is already in use.`);
+            console.error(`Please either:`);
+            console.error(`  1. Stop the process using port ${PORT}`);
+            console.error(`  2. Or set a different PORT in your .env file (e.g., PORT=5001)`);
+            console.error(`\nTo find the process using port ${PORT}, run:`);
+            console.error(`  Windows: netstat -ano | findstr :${PORT}`);
+            console.error(`  Linux/Mac: lsof -i :${PORT}\n`);
+            process.exit(1);
+        } else {
+            console.error('Server error:', err);
+            process.exit(1);
+        }
+    });
+}
+
+startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
 });

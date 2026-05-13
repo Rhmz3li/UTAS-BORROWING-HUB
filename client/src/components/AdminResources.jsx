@@ -322,25 +322,22 @@ const AdminResources = () => {
 
   const getStatusBadge = (status) => {
     const colors = {
-      'Available': { bg: '#e8f5e9', color: '#4caf50' },
-      'Borrowed': { bg: '#fff3e0', color: '#ff9800' },
-      'Reserved': { bg: '#e3f2fd', color: '#1976d2' },
-      'Maintenance': { bg: '#ffebee', color: '#f44336' },
-      'Lost': { bg: '#fce4ec', color: '#e91e63' }
+      'Available': { color: '#2e7d32' },
+      'Borrowed': { color: '#c77700' },
+      'Reserved': { color: '#1565c0' },
+      'Maintenance': { color: '#c62828' },
+      'Lost': { color: '#ad1457' }
     };
-    const style = colors[status] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[status] || { color: '#4b5563' };
     
     return (
-      <Badge style={{
-        background: style.bg,
+      <span style={{
         color: style.color,
-        padding: '0.25rem 0.75rem',
-        borderRadius: '12px',
         fontSize: '0.85rem',
         fontWeight: '600'
       }}>
         {status}
-      </Badge>
+      </span>
     );
   };
 
@@ -374,16 +371,16 @@ const AdminResources = () => {
   };
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       <Row className="mb-4">
         <Col>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+              <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.5rem' }}>
                 Resources Management
               </h2>
-              <p style={{ color: '#666', margin: 0 }}>
+              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
                 Manage all resources: add, edit, delete, and update status
               </p>
             </div>
@@ -409,7 +406,7 @@ const AdminResources = () => {
       {/* College Statistics Cards */}
       <Row className="mb-4">
         <Col>
-          <h5 style={{ color: '#333', fontWeight: '600', marginBottom: '1rem' }}>
+          <h5 style={{ color: 'var(--text-primary)', fontWeight: '600', marginBottom: '1rem' }}>
             Resources by College
           </h5>
         </Col>
@@ -425,8 +422,8 @@ const AdminResources = () => {
             <Col md={6} lg={4} xl={2} key={college} className="mb-3">
               <Card
                 style={{
-                  background: isSelected ? colors.bg : '#fff',
-                  border: isSelected ? 'none' : '1px solid #e0e0e0',
+                  background: isSelected ? colors.bg : 'var(--card-bg)',
+                  border: isSelected ? 'none' : '1px solid var(--border-color)',
                   borderRadius: '12px',
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
@@ -459,7 +456,7 @@ const AdminResources = () => {
                     <Icon />
                   </div>
                   <h6 style={{
-                    color: isSelected ? '#fff' : '#333',
+                    color: isSelected ? '#fff' : 'var(--text-primary)',
                     fontWeight: '600',
                     marginBottom: '0.5rem',
                     fontSize: '0.85rem',
@@ -476,7 +473,7 @@ const AdminResources = () => {
                     {count}
                   </div>
                   <small style={{
-                    color: isSelected ? 'rgba(255,255,255,0.9)' : '#666',
+                    color: isSelected ? 'rgba(255,255,255,0.9)' : 'var(--text-secondary)',
                     fontSize: '0.75rem'
                   }}>
                     {count === 1 ? 'Resource' : 'Resources'}
@@ -534,7 +531,7 @@ const AdminResources = () => {
               top: '50%',
               transform: 'translateY(-50%)',
               pointerEvents: 'none',
-              color: '#666',
+              color: 'var(--text-secondary)',
               fontSize: '0.85rem'
             }}>
               <FaBox />
@@ -553,7 +550,7 @@ const AdminResources = () => {
                   transform: 'translateY(-50%)',
                   background: 'transparent',
                   border: 'none',
-                  color: '#666',
+                  color: 'var(--text-secondary)',
                   padding: '0',
                   fontSize: '0.75rem'
                 }}
@@ -585,9 +582,9 @@ const AdminResources = () => {
           <div style={{ 
             padding: '0.5rem', 
             textAlign: 'center', 
-            background: '#fff', 
+            background: 'var(--card-bg)', 
             borderRadius: '8px',
-            border: '1px solid #e0e0e0'
+            border: '1px solid var(--border-color)'
           }}>
             <strong style={{ color: '#1976d2' }}>{total}</strong> Total
           </div>
@@ -595,8 +592,8 @@ const AdminResources = () => {
       </Row>
 
       {/* Resources Table */}
-      <Card className="border-0 shadow-sm">
-        <CardBody className="p-0">
+      <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
+        <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)' }}>
           {loading ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status">
@@ -606,12 +603,12 @@ const AdminResources = () => {
           ) : resources.length === 0 ? (
             <div className="text-center py-5">
               <FaBox style={{ fontSize: '3rem', color: '#ccc', marginBottom: '1rem' }} />
-              <p style={{ color: '#666' }}>No resources found</p>
+              <p style={{ color: 'var(--text-secondary)' }}>No resources found</p>
             </div>
           ) : (
             <div className="table-responsive">
               <Table hover style={{ margin: 0 }}>
-                <thead style={{ background: '#f8f9fa' }}>
+                <thead style={{ background: 'var(--bg-tertiary)' }}>
                   <tr>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Name</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Serial Number</th>
@@ -625,25 +622,22 @@ const AdminResources = () => {
                     <tr key={resource._id}>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         <div>
-                          <strong style={{ color: '#333', fontSize: '0.95rem' }}>{resource.name}</strong>
+                          <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>{resource.name}</strong>
                         </div>
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                        <span style={{ color: '#666', fontSize: '0.9rem', fontFamily: 'monospace' }}>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontFamily: 'monospace' }}>
                           {resource.barcode || resource.qr_code || 'N/A'}
                         </span>
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                        <Badge style={{ 
-                          background: '#e3f2fd', 
-                          color: '#1976d2', 
-                          padding: '0.4rem 0.8rem',
-                          borderRadius: '12px',
+                        <span style={{
+                          color: '#355c7d',
                           fontSize: '0.85rem',
                           fontWeight: '600'
                         }}>
                           {resource.category}
-                        </Badge>
+                        </span>
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {getStatusBadge(resource.status)}
@@ -699,7 +693,7 @@ const AdminResources = () => {
               >
                 Previous
               </Button>
-              <span style={{ padding: '0.5rem 1rem', background: '#fff', borderRadius: '8px' }}>
+              <span style={{ padding: '0.5rem 1rem', background: 'var(--card-bg)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
                 Page {currentPage} of {totalPages}
               </span>
               <Button
@@ -759,7 +753,7 @@ const AdminResources = () => {
                       top: '50%',
                       transform: 'translateY(-50%)',
                       pointerEvents: 'none',
-                      color: '#666',
+                      color: 'var(--text-secondary)',
                       fontSize: '0.85rem'
                     }}>
                       <FaBox />

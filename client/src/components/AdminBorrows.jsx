@@ -135,7 +135,15 @@ const AdminBorrows = () => {
       );
 
       if (response.data.success) {
-        toast.success('Borrow request rejected successfully. User has been notified.');
+        const refundAction = response.data.refundInfo?.action;
+        const refundMessage =
+          refundAction === 'refunded'
+            ? ' Payment refunded automatically.'
+            : refundAction === 'cancelled_pending'
+              ? ' Pending payment cancelled automatically.'
+              : '';
+
+        toast.success(`Borrow request rejected successfully.${refundMessage} User has been notified.`);
         setRejectModalOpen(false);
         setSelectedBorrow(null);
         setRejectReason('');
@@ -210,7 +218,33 @@ const AdminBorrows = () => {
   };
 
   const getStatusBadge = (status, dueDate) => {
-    const isOverdue = status === 'Active' && new Date(dueDate) < new Date();
+    if (status === 'PendingReturn') {
+      const cfg = {
+        bg: '#e3f2fd',
+        color: '#1565c0',
+        text: 'Return pending staff',
+        icon: <FaHourglassHalf />
+      };
+      return (
+        <Badge style={{
+          background: cfg.bg,
+          color: cfg.color,
+          padding: '0.25rem 0.75rem',
+          borderRadius: '12px',
+          fontSize: '0.85rem',
+          fontWeight: '600',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.25rem',
+          width: 'fit-content'
+        }}>
+          {cfg.icon}
+          {cfg.text}
+        </Badge>
+      );
+    }
+    const isOverdue =
+      status === 'Overdue' || (status === 'Active' && dueDate && new Date(dueDate) < new Date());
     const actualStatus = isOverdue ? 'Overdue' : status;
     
     const statusConfig = {
@@ -223,7 +257,7 @@ const AdminBorrows = () => {
       'Active': { 
         bg: '#e8f5e9', 
         color: '#4caf50', 
-        text: 'Approved (Active)',
+        text: 'Active',
         icon: <FaCheckCircle />
       },
       'Returned': { 
@@ -247,8 +281,8 @@ const AdminBorrows = () => {
     };
     
     const config = statusConfig[actualStatus] || { 
-      bg: '#f5f5f5', 
-      color: '#666', 
+      bg: 'var(--bg-tertiary)', 
+      color: 'var(--text-secondary)', 
       text: actualStatus,
       icon: null
     };
@@ -281,16 +315,16 @@ const AdminBorrows = () => {
   };
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       <Row className="mb-4">
         <Col>
           <div>
-            <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+            <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.5rem' }}>
               Borrows Management
             </h2>
-            <p style={{ color: '#666', margin: 0 }}>
-              Manage all borrows: approve pending requests, view details, return resources, and track overdue items
+            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+              Manage all borrows: approve requests, record physical collection, confirm returns, and track overdue items
             </p>
           </div>
         </Col>
@@ -328,6 +362,7 @@ const AdminBorrows = () => {
             <option value="Active">Active</option>
             <option value="Returned">Returned</option>
             <option value="Overdue">Overdue</option>
+            <option value="PendingReturn">Return pending staff</option>
             <option value="Lost">Lost</option>
           </Input>
         </Col>
@@ -335,9 +370,9 @@ const AdminBorrows = () => {
           <div style={{ 
             padding: '0.5rem', 
             textAlign: 'center', 
-            background: '#fff', 
+            background: 'var(--card-bg)', 
             borderRadius: '8px',
-            border: '1px solid #e0e0e0'
+            border: '1px solid var(--border-color)'
           }}>
             <strong style={{ color: '#1976d2' }}>{total}</strong> Total
           </div>
@@ -345,8 +380,8 @@ const AdminBorrows = () => {
       </Row>
 
       {/* Borrows Table */}
-      <Card className="border-0 shadow-sm">
-        <CardBody className="p-0">
+      <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
+        <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)' }}>
           {loading ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status">
@@ -356,12 +391,12 @@ const AdminBorrows = () => {
           ) : borrows.length === 0 ? (
             <div className="text-center py-5">
               <FaBookOpen style={{ fontSize: '3rem', color: '#ccc', marginBottom: '1rem' }} />
-              <p style={{ color: '#666' }}>No borrows found</p>
+              <p style={{ color: 'var(--text-secondary)' }}>No borrows found</p>
             </div>
           ) : (
             <div className="table-responsive">
               <Table hover style={{ margin: 0 }}>
-                <thead style={{ background: '#f8f9fa' }}>
+                <thead style={{ background: 'var(--bg-tertiary)' }}>
                   <tr>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -407,7 +442,9 @@ const AdminBorrows = () => {
                 </thead>
                 <tbody>
                   {borrows.map((borrow) => {
-                    const daysLate = borrow.status === 'Active' ? calculateDaysLate(borrow.due_date) : 0;
+                    const daysLate = ['Active', 'Overdue', 'PendingReturn'].includes(borrow.status)
+                      ? calculateDaysLate(borrow.due_date)
+                      : 0;
                     const isOverdue = daysLate > 0;
                     const penalty = borrow.penalty || null;
                     const fineAmount = penalty?.fine_amount || 0;
@@ -422,11 +459,11 @@ const AdminBorrows = () => {
                       <tr key={borrow._id} style={isOverdue ? { background: '#fff3e0' } : {}}>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                           <div>
-                            <strong style={{ color: '#333', fontSize: '0.95rem' }}>
+                            <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>
                               {borrow.resource_id?.name || 'N/A'}
                             </strong>
                             {borrow.resource_id?.category && (
-                              <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                                 {borrow.resource_id.category}
                               </div>
                             )}
@@ -434,18 +471,18 @@ const AdminBorrows = () => {
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                           <div>
-                            <strong style={{ color: '#333', fontSize: '0.95rem' }}>
+                            <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>
                               {borrow.user_id?.full_name || 'Not specified'}
                             </strong>
                             {borrow.user_id?.email && (
-                              <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                                 {borrow.user_id.email}
                               </div>
                             )}
                           </div>
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                          <span style={{ color: '#666', fontSize: '0.9rem' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                             {new Date(borrow.borrow_date).toLocaleDateString('en-US', {
                               month: '2-digit',
                               day: '2-digit',
@@ -454,7 +491,7 @@ const AdminBorrows = () => {
                           </span>
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                          <span style={{ color: isOverdue ? '#f44336' : '#666', fontSize: '0.9rem' }}>
+                          <span style={{ color: isOverdue ? '#f44336' : 'var(--text-secondary)', fontSize: '0.9rem' }}>
                             {borrow.return_date 
                               ? new Date(borrow.return_date).toLocaleDateString('en-US', {
                                   month: '2-digit',
@@ -473,7 +510,7 @@ const AdminBorrows = () => {
                         </td>
                         <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                           {fineAmount > 0 ? (
-                            <strong style={{ color: '#333', fontSize: '0.95rem' }}>
+                            <strong style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>
                               {fineAmount.toFixed(2)} OMR
                             </strong>
                           ) : (
@@ -542,7 +579,7 @@ const AdminBorrows = () => {
                                 </Badge>
                               ) : (
                                 <Badge style={{
-                                  background: '#f5f5f5',
+                                  background: 'var(--bg-tertiary)',
                                   color: '#999',
                                   padding: '0.3rem 0.7rem',
                                   borderRadius: '20px',
@@ -557,7 +594,7 @@ const AdminBorrows = () => {
                           )}
                           {!requiresDeposit && !penalty && (
                             <Badge style={{
-                              background: '#f5f5f5',
+                              background: 'var(--bg-tertiary)',
                               color: '#999',
                               padding: '0.3rem 0.7rem',
                               borderRadius: '20px',
@@ -611,7 +648,7 @@ const AdminBorrows = () => {
                                 </Button>
                               </>
                             )}
-                            {borrow.status === 'Active' && (
+                            {['Active', 'Overdue', 'PendingReturn'].includes(borrow.status) && (
                               <Button
                                 size="sm"
                                 onClick={() => handleReturn(borrow)}
@@ -621,9 +658,37 @@ const AdminBorrows = () => {
                                   borderRadius: '6px',
                                   padding: '0.4rem 0.8rem'
                                 }}
-                                title="Mark as Returned / Update Status"
+                                title="Confirm physical return / lost (releases inventory when returned)"
                               >
-                                <FaEdit style={{ fontSize: '0.85rem' }} /> Mark Return
+                                <FaEdit style={{ fontSize: '0.85rem' }} /> {borrow.status === 'PendingReturn' ? 'Confirm return' : 'Mark Return'}
+                              </Button>
+                            )}
+                            {borrow.status === 'PendingReturn' && (
+                              <Button
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    const token = localStorage.getItem('token');
+                                    await axios.put(
+                                      `http://localhost:5000/admin/borrows/${borrow._id}/cancel-pending-return`,
+                                      {},
+                                      { headers: { Authorization: `Bearer ${token}` } }
+                                    );
+                                    toast.success('Return request cancelled');
+                                    fetchBorrows();
+                                  } catch (err) {
+                                    toast.error(err.response?.data?.message || 'Failed to cancel');
+                                  }
+                                }}
+                                style={{
+                                  background: '#6d4c41',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  padding: '0.4rem 0.8rem'
+                                }}
+                                title="User must keep item — cancel their return request"
+                              >
+                                <FaUndo style={{ fontSize: '0.85rem' }} /> Cancel request
                               </Button>
                             )}
                             <Button
@@ -679,7 +744,7 @@ const AdminBorrows = () => {
               >
                 Previous
               </Button>
-              <span style={{ padding: '0.5rem 1rem', background: '#fff', borderRadius: '8px' }}>
+              <span style={{ padding: '0.5rem 1rem', background: 'var(--card-bg)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
                 Page {currentPage} of {totalPages}
               </span>
               <Button
@@ -741,9 +806,14 @@ const AdminBorrows = () => {
                     )}
                   </Col>
                 </Row>
-                {selectedBorrow.status === 'Active' && calculateDaysLate(selectedBorrow.due_date) > 0 && (
+                {['Active', 'Overdue', 'PendingReturn'].includes(selectedBorrow.status) && calculateDaysLate(selectedBorrow.due_date) > 0 && (
                   <Alert color="warning" className="mt-3">
                     <FaExclamationTriangle /> This borrow is {calculateDaysLate(selectedBorrow.due_date)} days overdue!
+                  </Alert>
+                )}
+                {selectedBorrow.status === 'PendingReturn' && (
+                  <Alert color="info" className="mt-3">
+                    User submitted a return — confirm physical receipt with <strong>Mark Return</strong> to release inventory, or <strong>Cancel request</strong> from the list.
                   </Alert>
                 )}
               </Col>
@@ -776,7 +846,7 @@ const AdminBorrows = () => {
               </Button>
             </>
           )}
-          {selectedBorrow?.status === 'Active' && (
+          {selectedBorrow && ['Active', 'Overdue', 'PendingReturn'].includes(selectedBorrow.status) && (
             <Button 
               color="success" 
               onClick={() => {
@@ -784,7 +854,7 @@ const AdminBorrows = () => {
                 handleReturn(selectedBorrow);
               }}
             >
-              <FaEdit /> Mark Return
+              <FaEdit /> {selectedBorrow.status === 'PendingReturn' ? 'Confirm return' : 'Mark Return'}
             </Button>
           )}
         </ModalFooter>
@@ -793,7 +863,7 @@ const AdminBorrows = () => {
       {/* Return Resource Modal */}
       <Modal isOpen={returnModalOpen} toggle={() => setReturnModalOpen(false)}>
         <ModalHeader toggle={() => setReturnModalOpen(false)}>
-          Return Resource
+          {selectedBorrow?.status === 'PendingReturn' ? 'Confirm physical return' : 'Return Resource'}
         </ModalHeader>
         <Form onSubmit={(e) => { e.preventDefault(); confirmReturn(); }}>
           <ModalBody>
@@ -867,7 +937,7 @@ const AdminBorrows = () => {
                     placeholder="Additional notes about the return..."
                   />
                 </FormGroup>
-                {selectedBorrow.status === 'Active' && calculateDaysLate(selectedBorrow.due_date) > 0 && returnData.status === 'Returned' && (
+                {['Active', 'Overdue', 'PendingReturn'].includes(selectedBorrow.status) && calculateDaysLate(selectedBorrow.due_date) > 0 && returnData.status === 'Returned' && (
                   <Alert color="warning">
                     <FaExclamationTriangle /> This resource is {calculateDaysLate(selectedBorrow.due_date)} day(s) overdue.
                     A late return penalty of {(calculateDaysLate(selectedBorrow.due_date) * 0.5).toFixed(2)} OMR will be applied.
@@ -947,9 +1017,9 @@ const AdminBorrows = () => {
               <strong>Resource:</strong> {selectedBorrow.resource_id?.name}
               <br />
               <strong>Status:</strong> {selectedBorrow.status}
-              {selectedBorrow.status === 'Active' && (
+              {['Active', 'Overdue', 'PendingReturn'].includes(selectedBorrow.status) && (
                 <div className="mt-2" style={{ color: '#d32f2f', fontWeight: '600' }}>
-                  ⚠️ Active borrows will have their resource quantity restored!
+                  Active, overdue, or pending-return borrows will have their resource quantity restored when deleted!
                 </div>
               )}
             </Alert>

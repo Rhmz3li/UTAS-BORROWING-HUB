@@ -150,7 +150,7 @@ const BorrowingForm = ({ isOpen, toggle, device }) => {
                   className="modern-input"
                   style={{
                     padding: "12px 15px",
-                    background: "#f8f9fa",
+                    background: "var(--bg-tertiary)",
                     border: "2px solid #e2e8f0",
                     borderRadius: "8px",
                     color: "#495057",

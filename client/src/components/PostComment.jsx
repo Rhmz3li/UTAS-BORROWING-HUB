@@ -22,7 +22,7 @@ const PostComment = ({ postId, onCommentSubmit }) => {
                         placeholder="Write a comment..."
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
-                        style={{ border: 'none', background: '#f8f9fa' }}
+                        style={{ border: 'none', background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
                     />
                     <Button type="submit" color="primary" size="sm">
                         <FaPaperPlane />

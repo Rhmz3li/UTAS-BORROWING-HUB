@@ -6,7 +6,11 @@ const BorrowSchema = mongoose.Schema({
     borrow_date: {type: Date, required: true, default: Date.now},
     due_date: {type: Date, required: true},
     return_date: {type: Date, required: false, default: null},
-    status: {type: String, required: true, enum: ['Active', 'Returned', 'Overdue', 'Lost', 'PendingApproval'], default: 'PendingApproval'},
+    // User submitted return; inventory stays reserved until Admin/Assistant confirms receipt
+    return_requested_at: {type: Date, required: false, default: null},
+    approved_at: {type: Date, required: false, default: null},
+    claimed_at: {type: Date, required: false, default: null},
+    status: {type: String, required: true, enum: ['Approved', 'Claimed', 'Active', 'Returned', 'Overdue', 'Lost', 'PendingApproval', 'PendingReturn'], default: 'PendingApproval'},
     condition_on_borrow: {type: String, required: false, enum: ['Excellent', 'Good', 'Fair', 'Poor'], default: 'Good'},
     condition_on_return: {
         type: String, 
@@ -31,6 +35,7 @@ const BorrowSchema = mongoose.Schema({
     payment_method: {type: String, required: false, enum: ['Cash', 'Card', 'Online', 'Bank Transfer', null], default: null},
     payment_status: {type: String, required: false, enum: ['Pending', 'Paid', 'Not Required'], default: 'Not Required'},
     payment_id: {type: mongoose.Schema.Types.ObjectId, ref: 'Payments', required: false, default: null},
+    borrow_duration_days: {type: Number, required: false, default: 1, min: 1},
     created_at: {type: Date, required: false, default: Date.now},
     updated_at: {type: Date, required: false, default: Date.now}
 }, {
@@ -44,7 +49,7 @@ BorrowSchema.index({ due_date: 1, status: 1 });
 
 // Virtual for days late
 BorrowSchema.virtual('days_late').get(function() {
-    if (this.status === 'Active' && this.due_date < new Date()) {
+    if (['Claimed', 'Active', 'PendingReturn'].includes(this.status) && this.due_date < new Date()) {
         const diffTime = Math.abs(new Date() - this.due_date);
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     }

@@ -125,7 +125,7 @@ const AdminPenalties = () => {
       'Waived': { bg: '#e1f5fe', color: '#0288d1' },
       'Cancelled': { bg: '#ffebee', color: '#f44336' }
     };
-    const style = colors[status] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[status] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
     return (
       <Badge style={{
@@ -151,7 +151,7 @@ const AdminPenalties = () => {
       'Damage': { bg: '#ffebee', color: '#f44336' },
       'Loss': { bg: '#f3e5f5', color: '#9c27b0' }
     };
-    const style = colors[type] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[type] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
     return (
       <Badge style={{
@@ -176,7 +176,7 @@ const AdminPenalties = () => {
       'Severe': { bg: '#f3e5f5', color: '#9c27b0' },
       'Total Loss': { bg: '#212121', color: '#fff' }
     };
-    const style = colors[level] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[level] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
     return (
       <Badge style={{
@@ -198,15 +198,15 @@ const AdminPenalties = () => {
     .reduce((sum, p) => sum + (p.fine_amount || 0), 0);
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       <Row className="mb-4">
         <Col>
           <div>
-            <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+            <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.5rem' }}>
               Penalties Management
             </h2>
-            <p style={{ color: '#666', margin: 0 }}>
+            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
               Manage all penalties: view details, update status, and waive penalties
             </p>
           </div>
@@ -278,9 +278,9 @@ const AdminPenalties = () => {
           <div style={{ 
             padding: '0.5rem', 
             textAlign: 'center', 
-            background: '#fff', 
+            background: 'var(--card-bg)', 
             borderRadius: '8px',
-            border: '1px solid #e0e0e0'
+            border: '1px solid var(--border-color)'
           }}>
             <strong style={{ color: '#1976d2' }}>{total}</strong> Total
           </div>
@@ -288,8 +288,8 @@ const AdminPenalties = () => {
       </Row>
 
       {/* Penalties Table */}
-      <Card className="border-0 shadow-sm">
-        <CardBody className="p-0">
+      <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
+        <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)' }}>
           {loading ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status">
@@ -299,12 +299,12 @@ const AdminPenalties = () => {
           ) : penalties.length === 0 ? (
             <div className="text-center py-5">
               <FaMoneyBillWave style={{ fontSize: '3rem', color: '#ccc', marginBottom: '1rem' }} />
-              <p style={{ color: '#666' }}>No penalties found</p>
+              <p style={{ color: 'var(--text-secondary)' }}>No penalties found</p>
             </div>
           ) : (
             <div className="table-responsive">
               <Table hover style={{ margin: 0 }}>
-                <thead style={{ background: '#f8f9fa' }}>
+                <thead style={{ background: 'var(--bg-tertiary)' }}>
                   <tr>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>User</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Type</th>
@@ -320,11 +320,11 @@ const AdminPenalties = () => {
                     <tr key={penalty._id}>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         <div>
-                          <strong style={{ color: '#333' }}>
+                          <strong style={{ color: 'var(--text-primary)' }}>
                             {penalty.user_id?.full_name || 'N/A'}
                           </strong>
                           {penalty.user_id?.email && (
-                            <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                               {penalty.user_id.email}
                             </div>
                           )}
@@ -338,7 +338,7 @@ const AdminPenalties = () => {
                           </div>
                         )}
                         {penalty.days_late > 0 && (
-                          <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.25rem' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                             {penalty.days_late} day{penalty.days_late !== 1 ? 's' : ''} late
                           </div>
                         )}
@@ -351,7 +351,7 @@ const AdminPenalties = () => {
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         <div style={{ maxWidth: '200px' }}>
                           {penalty.description && (
-                            <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                               {penalty.description.length > 50 
                                 ? `${penalty.description.substring(0, 50)}...` 
                                 : penalty.description}
@@ -365,7 +365,7 @@ const AdminPenalties = () => {
                         </div>
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                        <span style={{ color: '#666' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>
                           {new Date(penalty.created_at).toLocaleDateString()}
                         </span>
                       </td>
@@ -435,7 +435,7 @@ const AdminPenalties = () => {
               >
                 Previous
               </Button>
-              <span style={{ padding: '0.5rem 1rem', background: '#fff', borderRadius: '8px' }}>
+              <span style={{ padding: '0.5rem 1rem', background: 'var(--card-bg)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
                 Page {currentPage} of {totalPages}
               </span>
               <Button

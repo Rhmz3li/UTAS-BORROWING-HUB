@@ -153,17 +153,18 @@ const ResourceDetail = () => {
       })).unwrap();
       
       const location = resource.location || 'IT Borrowing Hub - Lab 2';
-      toast.success(
-        `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
-        { autoClose: 6000 }
-      );
+      const needsDeposit = resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0);
 
-      // After browsing/borrowing, show a popup explaining how to pay the deposit (if required)
-      if (resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0)) {
-        const depositAmount = Math.min(resource.payment_amount || 0, 10).toFixed(2);
-        // Guide the user directly to the Payments page to complete the deposit
-        navigate('/payments');
+      if (needsDeposit && paymentMethod === 'Card' && result?.data?.payment_id) {
+        toast.info('Borrow request created. Complete the online card payment to send it to admin for approval.');
+        navigate('/payments', { state: { openPaymentId: result.data.payment_id } });
+      } else {
+        toast.success(
+          `Borrow request submitted successfully! Pending admin approval. You will be notified when approved. Pickup location: ${location}`,
+          { autoClose: 6000 }
+        );
       }
+
       setBorrowModal(false);
       setSelectedBorrowDate('');
       setTermsAccepted(false);
@@ -189,8 +190,10 @@ const ResourceDetail = () => {
       return;
     }
 
+    const needsDeposit = resource.requires_payment || (resource.payment_amount && resource.payment_amount > 0);
+
     // Check if payment is required
-    if (resource.requires_payment && resource.payment_amount > 0) {
+    if (needsDeposit) {
       if (!paymentMethod) {
         toast.error('Please select a payment method');
         return;
@@ -202,20 +205,30 @@ const ResourceDetail = () => {
       const expiryDate = new Date(pickupDate);
       expiryDate.setDate(expiryDate.getDate() + 7); // Default 7 days expiry
 
-      await dispatch(addReservation({
+      const result = await dispatch(addReservation({
         resource_id: resource._id,
         pickup_date: pickupDate.toISOString(),
-        expiry_date: expiryDate.toISOString()
+        expiry_date: expiryDate.toISOString(),
+        terms_accepted: true,
+        payment_method: needsDeposit ? paymentMethod : null,
+        payment_amount: needsDeposit ? Math.min(resource.payment_amount || 0, 10) : 0
       })).unwrap();
-      
-      toast.success('Reservation created successfully! You will be notified when the resource is available.' + (resource.requires_payment ? ' Payment will be processed by admin.' : ''));
+
+      if (needsDeposit && paymentMethod === 'Card' && result?.data?.payment_id) {
+        toast.info('Reservation request created. Complete the online card payment to send it to admin for approval.');
+        navigate('/payments', { state: { openPaymentId: result.data.payment_id } });
+      } else {
+        toast.success('Reservation request submitted successfully! Pending admin approval.');
+      }
       setReserveModal(false);
       setSelectedReserveDate('');
       setTermsAccepted(false);
       setPaymentMethod('');
       fetchResource();
       fetchAvailability();
-      navigate('/reservations');
+      if (!(needsDeposit && paymentMethod === 'Card' && result?.data?.payment_id)) {
+        navigate('/reservations');
+      }
     } catch (error) {
       // Handle error from rejectWithValue (payload) or regular error (message)
       let errorMessage = 'Failed to create reservation';
@@ -328,7 +341,7 @@ const ResourceDetail = () => {
           alignItems: 'center', 
           marginBottom: '1.5rem',
           paddingBottom: '1rem',
-          borderBottom: '2px solid #e0e0e0'
+          borderBottom: '2px solid var(--border-color)'
         }}>
           <Button
             onClick={() => {
@@ -401,23 +414,23 @@ const ResourceDetail = () => {
                   background: isSelected 
                     ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
                     : isSuggested
-                    ? '#e3f2fd'
+                    ? 'rgba(102, 126, 234, 0.22)'
                     : isDisabled
-                    ? '#f5f5f5'
-                    : '#fff',
+                    ? 'var(--bg-tertiary)'
+                    : 'var(--card-bg)',
                   color: isSelected 
                     ? '#fff'
                     : isDisabled
                     ? '#ccc'
-                    : '#333',
+                    : 'var(--text-primary)',
                   borderRadius: '12px',
                   border: isSelected 
                     ? '3px solid #667eea'
                     : isSuggested
                     ? '2px solid #90caf9'
                     : isDisabled
-                    ? '1px solid #e0e0e0'
-                    : '2px solid #e0e0e0',
+                    ? '1px solid var(--border-color)'
+                    : '2px solid var(--border-color)',
                   fontWeight: isSelected ? 'bold' : 'normal',
                   transition: 'all 0.2s ease',
                   position: 'relative',
@@ -425,13 +438,13 @@ const ResourceDetail = () => {
                 }}
                 onMouseEnter={(e) => {
                   if (!isDisabled && !isSelected) {
-                    e.currentTarget.style.background = isSuggested ? '#bbdefb' : '#f0f0f0';
+                    e.currentTarget.style.background = isSuggested ? 'rgba(102, 126, 234, 0.35)' : 'var(--hover-bg)';
                     e.currentTarget.style.transform = 'scale(1.05)';
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isDisabled && !isSelected) {
-                    e.currentTarget.style.background = isSuggested ? '#e3f2fd' : '#fff';
+                    e.currentTarget.style.background = isSuggested ? 'rgba(102, 126, 234, 0.22)' : 'var(--card-bg)';
                     e.currentTarget.style.transform = 'scale(1)';
                   }
                 }}
@@ -471,7 +484,7 @@ const ResourceDetail = () => {
           gap: '1.5rem',
           justifyContent: 'center',
           paddingTop: '1rem',
-          borderTop: '1px solid #e0e0e0',
+          borderTop: '1px solid var(--border-color)',
           flexWrap: 'wrap'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -482,28 +495,28 @@ const ResourceDetail = () => {
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
               border: '2px solid #667eea'
             }} />
-            <small style={{ color: '#666' }}>Selected</small>
+            <small style={{ color: 'var(--text-secondary)' }}>Selected</small>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{
               width: '20px',
               height: '20px',
               borderRadius: '8px',
-              background: '#e3f2fd',
+              background: 'rgba(102, 126, 234, 0.18)',
               border: '2px solid #90caf9'
             }} />
-            <small style={{ color: '#666' }}>Suggested</small>
+            <small style={{ color: 'var(--text-secondary)' }}>Suggested</small>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{
               width: '20px',
               height: '20px',
               borderRadius: '8px',
-              background: '#f5f5f5',
-              border: '1px solid #e0e0e0',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-color)',
               opacity: 0.5
             }} />
-            <small style={{ color: '#666' }}>Unavailable</small>
+            <small style={{ color: 'var(--text-secondary)' }}>Unavailable</small>
           </div>
         </div>
       </div>
@@ -600,7 +613,7 @@ const ResourceDetail = () => {
           alignItems: 'center', 
           marginBottom: '1.5rem',
           paddingBottom: '1rem',
-          borderBottom: '2px solid #e0e0e0'
+          borderBottom: '2px solid var(--border-color)'
         }}>
           <Button
             onClick={() => {
@@ -674,23 +687,23 @@ const ResourceDetail = () => {
                   background: isSelected 
                     ? 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
                     : isSuggested
-                    ? '#e3f2fd'
+                    ? 'rgba(79, 172, 254, 0.22)'
                     : isDisabled
-                    ? '#f5f5f5'
-                    : '#fff',
+                    ? 'var(--bg-tertiary)'
+                    : 'var(--card-bg)',
                   color: isSelected 
                     ? '#fff'
                     : isDisabled
                     ? '#ccc'
-                    : '#333',
+                    : 'var(--text-primary)',
                   borderRadius: '12px',
                   border: isSelected 
                     ? '3px solid #4facfe'
                     : isSuggested
                     ? '2px solid #90caf9'
                     : isDisabled
-                    ? '1px solid #e0e0e0'
-                    : '2px solid #e0e0e0',
+                    ? '1px solid var(--border-color)'
+                    : '2px solid var(--border-color)',
                   fontWeight: isSelected ? 'bold' : 'normal',
                   transition: 'all 0.2s ease',
                   position: 'relative',
@@ -698,13 +711,13 @@ const ResourceDetail = () => {
                 }}
                 onMouseEnter={(e) => {
                   if (!isDisabled && !isSelected) {
-                    e.currentTarget.style.background = isSuggested ? '#bbdefb' : '#f0f0f0';
+                    e.currentTarget.style.background = isSuggested ? 'rgba(102, 126, 234, 0.35)' : 'var(--hover-bg)';
                     e.currentTarget.style.transform = 'scale(1.05)';
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isDisabled && !isSelected) {
-                    e.currentTarget.style.background = isSuggested ? '#e3f2fd' : '#fff';
+                    e.currentTarget.style.background = isSuggested ? 'rgba(102, 126, 234, 0.22)' : 'var(--card-bg)';
                     e.currentTarget.style.transform = 'scale(1)';
                   }
                 }}
@@ -745,7 +758,7 @@ const ResourceDetail = () => {
           gap: '1.5rem',
           justifyContent: 'center',
           paddingTop: '1rem',
-          borderTop: '1px solid #e0e0e0',
+          borderTop: '1px solid var(--border-color)',
           flexWrap: 'wrap'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -756,28 +769,28 @@ const ResourceDetail = () => {
               background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
               border: '2px solid #4facfe'
             }} />
-            <small style={{ color: '#666' }}>Selected</small>
+            <small style={{ color: 'var(--text-secondary)' }}>Selected</small>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{
               width: '20px',
               height: '20px',
               borderRadius: '8px',
-              background: '#e3f2fd',
+              background: 'rgba(102, 126, 234, 0.18)',
               border: '2px solid #90caf9'
             }} />
-            <small style={{ color: '#666' }}>Suggested</small>
+            <small style={{ color: 'var(--text-secondary)' }}>Suggested</small>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{
               width: '20px',
               height: '20px',
               borderRadius: '8px',
-              background: '#f5f5f5',
-              border: '1px solid #e0e0e0',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-color)',
               opacity: 0.5
             }} />
-            <small style={{ color: '#666' }}>Unavailable</small>
+            <small style={{ color: 'var(--text-secondary)' }}>Unavailable</small>
           </div>
         </div>
       </div>
@@ -786,7 +799,7 @@ const ResourceDetail = () => {
 
   if (loading) {
     return (
-      <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
+      <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
         <Container fluid className="py-5">
           <div className="text-center">
             <Spinner color="primary" />
@@ -799,7 +812,7 @@ const ResourceDetail = () => {
 
   if (!resource) {
     return (
-      <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
+      <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
         <Container fluid className="py-5">
         <Alert color="danger">
           <h4>Resource not found</h4>
@@ -820,7 +833,7 @@ const ResourceDetail = () => {
   const mainImage = images.length > 0 ? images[selectedImageIndex] : null;
 
     return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       <Row className="mb-4">
         <Col>
@@ -828,7 +841,7 @@ const ResourceDetail = () => {
             onClick={() => navigate('/resources')}
             style={{ 
               marginBottom: '1rem',
-              background: '#fff',
+              background: 'var(--card-bg)',
               color: '#667eea',
               border: '2px solid #667eea',
               borderRadius: '10px',
@@ -916,7 +929,7 @@ const ResourceDetail = () => {
                         objectFit: 'cover',
                         borderRadius: '8px',
                         cursor: 'pointer',
-                        border: selectedImageIndex === idx ? '3px solid #1976d2' : '2px solid #e0e0e0',
+                        border: selectedImageIndex === idx ? '3px solid #1976d2' : '2px solid var(--border-color)',
                         transition: 'all 0.2s ease'
                       }}
                       onMouseEnter={(e) => {
@@ -977,7 +990,7 @@ const ResourceDetail = () => {
                     <Badge style={{ 
                       fontSize: '0.9rem', 
                       padding: '0.6rem 1.2rem',
-                      background: '#e3f2fd',
+                      background: 'rgba(102, 126, 234, 0.18)',
                       color: '#1976d2',
                       border: 'none',
                       borderRadius: '25px',
@@ -991,7 +1004,7 @@ const ResourceDetail = () => {
 
               {resource.description && (
                 <div className="mb-4" style={{
-                  background: '#f8f9fa',
+                  background: 'var(--bg-tertiary)',
                   padding: '1.5rem',
                   borderRadius: '15px',
                   border: '1px solid #e9ecef'
@@ -1437,8 +1450,6 @@ const ResourceDetail = () => {
                     <option value="">Choose payment method...</option>
                     <option value="Cash">Cash</option>
                     <option value="Card">Card</option>
-                    <option value="Online">Online</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
                   </Input>
                 </FormGroup>
                 <div style={{ fontSize: '0.85rem', color: '#1565c0', marginTop: '0.75rem', fontStyle: 'italic' }}>
@@ -1450,9 +1461,9 @@ const ResourceDetail = () => {
             {/* Terms and Conditions */}
             <div className="mt-4" style={{ 
               padding: '1rem', 
-              background: '#f8f9fa', 
+              background: 'var(--bg-tertiary)', 
               borderRadius: '10px',
-              border: '1px solid #e0e0e0'
+              border: '1px solid var(--border-color)'
             }}>
               <FormGroup check>
                 <Label check style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
@@ -1463,7 +1474,7 @@ const ResourceDetail = () => {
                     style={{ marginRight: '0.75rem', cursor: 'pointer' }}
                   />
                   <div>
-                    <span style={{ fontWeight: '600', color: '#333' }}>
+                    <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
                       I accept the <button
                         type="button"
                         onClick={(e) => {
@@ -1483,7 +1494,7 @@ const ResourceDetail = () => {
                         Terms and Conditions
                       </button>
                     </span>
-                    <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                       By checking this box, you agree to be responsible for any loss, damage, or late return penalties.
                     </div>
                   </div>
@@ -1501,8 +1512,8 @@ const ResourceDetail = () => {
               setPaymentMethod('');
             }}
             style={{
-              background: '#f5f5f5',
-              color: '#666',
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-secondary)',
               border: 'none',
               borderRadius: '10px',
               padding: '0.75rem 1.5rem',
@@ -1562,10 +1573,10 @@ const ResourceDetail = () => {
               
               {/* Custom Calendar */}
               <div style={{
-                border: '2px solid #e0e0e0',
+                border: '2px solid var(--border-color)',
                 borderRadius: '15px',
                 padding: '1.5rem',
-                background: '#fff',
+                background: 'var(--card-bg)',
                 marginBottom: '1rem'
               }}>
                 {renderReservationCalendar()}
@@ -1575,7 +1586,7 @@ const ResourceDetail = () => {
                 <div style={{
                   marginTop: '1rem',
                   padding: '1rem',
-                  background: '#e3f2fd',
+                  background: 'rgba(102, 126, 234, 0.18)',
                   borderRadius: '10px',
                   border: '1px solid #90caf9'
                 }}>
@@ -1602,7 +1613,7 @@ const ResourceDetail = () => {
 
               {suggestedDates.length > 0 && (
                 <div style={{ marginTop: '1rem' }}>
-                  <Label style={{ fontWeight: '600', color: '#2c3e50', marginBottom: '0.75rem', fontSize: '0.95rem' }}>
+                  <Label style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.75rem', fontSize: '0.95rem' }}>
                     <FaBell className="me-2" style={{ color: '#4facfe' }} />Suggested Available Dates:
                   </Label>
                   <div className="d-flex flex-wrap gap-2">
@@ -1614,7 +1625,7 @@ const ResourceDetail = () => {
                           padding: '0.6rem 1.2rem',
                           background: selectedReserveDate === date
                             ? 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
-                            : '#e3f2fd',
+                            : 'rgba(79, 172, 254, 0.22)',
                           color: selectedReserveDate === date ? '#fff' : '#1976d2',
                           border: 'none',
                           borderRadius: '20px',
@@ -1626,13 +1637,13 @@ const ResourceDetail = () => {
                         onMouseEnter={(e) => {
                           if (selectedReserveDate !== date) {
                             e.currentTarget.style.transform = 'scale(1.05)';
-                            e.currentTarget.style.background = '#bbdefb';
+                            e.currentTarget.style.background = 'rgba(79, 172, 254, 0.38)';
                           }
                         }}
                         onMouseLeave={(e) => {
                           if (selectedReserveDate !== date) {
                             e.currentTarget.style.transform = 'scale(1)';
-                            e.currentTarget.style.background = '#e3f2fd';
+                            e.currentTarget.style.background = 'rgba(79, 172, 254, 0.22)';
                           }
                         }}
                       >
@@ -1703,8 +1714,6 @@ const ResourceDetail = () => {
                     <option value="">Choose payment method...</option>
                     <option value="Cash">Cash</option>
                     <option value="Card">Card</option>
-                    <option value="Online">Online</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
                   </Input>
                 </FormGroup>
                 <div style={{ fontSize: '0.85rem', color: '#1565c0', marginTop: '0.75rem', fontStyle: 'italic' }}>
@@ -1716,9 +1725,9 @@ const ResourceDetail = () => {
             {/* Terms and Conditions */}
             <div className="mt-4" style={{ 
               padding: '1rem', 
-              background: '#f8f9fa', 
+              background: 'var(--bg-tertiary)', 
               borderRadius: '10px',
-              border: '1px solid #e0e0e0'
+              border: '1px solid var(--border-color)'
             }}>
               <FormGroup check>
                 <Label check style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
@@ -1729,7 +1738,7 @@ const ResourceDetail = () => {
                     style={{ marginRight: '0.75rem', cursor: 'pointer' }}
                   />
                   <div>
-                    <span style={{ fontWeight: '600', color: '#333' }}>
+                    <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
                       I accept the <button
                         type="button"
                         onClick={(e) => {
@@ -1749,7 +1758,7 @@ const ResourceDetail = () => {
                         Terms and Conditions
                       </button>
                     </span>
-                    <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                       By checking this box, you agree to be responsible for any loss, damage, or late return penalties.
                     </div>
                   </div>
@@ -1766,8 +1775,8 @@ const ResourceDetail = () => {
               setPaymentMethod('');
             }}
             style={{
-              background: '#f5f5f5',
-              color: '#666',
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-secondary)',
               border: 'none',
               borderRadius: '10px',
               padding: '0.75rem 1.5rem',

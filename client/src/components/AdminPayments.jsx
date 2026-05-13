@@ -94,6 +94,57 @@ const AdminPayments = () => {
     }
   };
 
+  /** Record refund after staff returns money (Completed → Refunded) */
+  const quickRefundToUser = async (payment) => {
+    if (payment.status !== 'Completed') return;
+    const name = payment.user_id?.full_name || 'the user';
+    const msg =
+      `Record refund of ${payment.amount?.toFixed(2)} OMR for "${name}"?\n\n` +
+      `Use this only after returning the money to the user at the hub.`;
+    if (!window.confirm(msg)) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `http://localhost:5000/admin/payments/${payment._id}/status`,
+        {
+          status: 'Refunded',
+          notes: 'Deposit refund confirmed by admin'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Refund recorded successfully');
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to record refund');
+    }
+  };
+
+  /** Cancel a pending borrow/reservation deposit the user no longer needs to pay */
+  const quickCancelPendingDeposit = async (payment) => {
+    if (payment.status !== 'Pending' || !['Resource', 'Reservation'].includes(payment.payment_type)) return;
+    if (
+      !window.confirm(
+        'Cancel this pending deposit payment request?'
+      )
+    )
+      return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `http://localhost:5000/admin/payments/${payment._id}/status`,
+        {
+          status: 'Failed',
+          notes: 'Pending deposit cancelled by admin'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Payment request cancelled successfully');
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Cancellation failed');
+    }
+  };
+
   const getStatusBadge = (status) => {
     const colors = {
       'Pending': { bg: '#fff3e0', color: '#ff9800' },
@@ -101,7 +152,7 @@ const AdminPayments = () => {
       'Failed': { bg: '#ffebee', color: '#f44336' },
       'Refunded': { bg: '#f3e5f5', color: '#9c27b0' }
     };
-    const style = colors[status] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[status] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
     return (
       <Badge style={{
@@ -131,7 +182,7 @@ const AdminPayments = () => {
       'Online': { bg: '#fff3e0', color: '#ff9800' },
       'Bank Transfer': { bg: '#f3e5f5', color: '#9c27b0' }
     };
-    const style = colors[method] || { bg: '#f5f5f5', color: '#666' };
+    const style = colors[method] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
     return (
       <Badge style={{
@@ -158,15 +209,15 @@ const AdminPayments = () => {
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
       <Row className="mb-4">
         <Col>
           <div>
-            <h2 style={{ color: '#333', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+            <h2 style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '0.5rem' }}>
               Payments Management
             </h2>
-            <p style={{ color: '#666', margin: 0 }}>
+            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
               Manage all payments: view details, confirm, and update payment status
             </p>
           </div>
@@ -276,9 +327,9 @@ const AdminPayments = () => {
           <div style={{ 
             padding: '0.5rem', 
             textAlign: 'center', 
-            background: '#fff', 
+            background: 'var(--card-bg)', 
             borderRadius: '8px',
-            border: '1px solid #e0e0e0'
+            border: '1px solid var(--border-color)'
           }}>
             <strong style={{ color: '#1976d2' }}>{total}</strong> Total
           </div>
@@ -286,8 +337,8 @@ const AdminPayments = () => {
       </Row>
 
       {/* Payments Table */}
-      <Card className="border-0 shadow-sm">
-        <CardBody className="p-0">
+      <Card className="border-0 shadow-sm" style={{ backgroundColor: 'var(--card-bg)' }}>
+        <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)' }}>
           {loading ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status">
@@ -297,12 +348,12 @@ const AdminPayments = () => {
           ) : payments.length === 0 ? (
             <div className="text-center py-5">
               <FaCreditCard style={{ fontSize: '3rem', color: '#ccc', marginBottom: '1rem' }} />
-              <p style={{ color: '#666' }}>No payments found</p>
+              <p style={{ color: 'var(--text-secondary)' }}>No payments found</p>
             </div>
           ) : (
             <div className="table-responsive">
               <Table hover style={{ margin: 0 }}>
-                <thead style={{ background: '#f8f9fa' }}>
+                <thead style={{ background: 'var(--bg-tertiary)' }}>
                   <tr>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>User</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Amount</th>
@@ -310,6 +361,7 @@ const AdminPayments = () => {
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Transaction ID</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Date</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Type</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600', textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
@@ -318,11 +370,11 @@ const AdminPayments = () => {
                     <tr key={payment._id}>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         <div>
-                          <strong style={{ color: '#333' }}>
+                          <strong style={{ color: 'var(--text-primary)' }}>
                             {payment.user_id?.full_name || 'N/A'}
                           </strong>
                           {payment.user_id?.email && (
-                            <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                               {payment.user_id.email}
                             </div>
                           )}
@@ -343,7 +395,7 @@ const AdminPayments = () => {
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {payment.transaction_id ? (
-                          <code style={{ fontSize: '0.85rem', color: '#666' }}>
+                          <code style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             {payment.transaction_id}
                           </code>
                         ) : (
@@ -351,7 +403,7 @@ const AdminPayments = () => {
                         )}
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                        <span style={{ color: '#666' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>
                           {new Date(payment.created_at).toLocaleDateString()}
                         </span>
                         <div style={{ fontSize: '0.75rem', color: '#999' }}>
@@ -361,8 +413,11 @@ const AdminPayments = () => {
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {getStatusBadge(payment.status)}
                       </td>
+                      <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', fontSize: '0.85rem', color: '#555' }}>
+                        {payment.payment_type || '—'}
+                      </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <Button
                             size="sm"
                             onClick={() => handleView(payment)}
@@ -371,6 +426,30 @@ const AdminPayments = () => {
                           >
                             <FaEye />
                           </Button>
+                          {payment.status === 'Completed' && (
+                            <Button
+                              size="sm"
+                              onClick={() => quickRefundToUser(payment)}
+                              style={{
+                                background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)',
+                                border: 'none'
+                              }}
+                              title="Mark refunded"
+                            >
+                              <FaUndo className="me-1" />
+                              Refund
+                            </Button>
+                          )}
+                          {payment.status === 'Pending' && ['Resource', 'Reservation'].includes(payment.payment_type) && (
+                            <Button
+                              size="sm"
+                              color="warning"
+                              onClick={() => quickCancelPendingDeposit(payment)}
+                              title="Cancel pending deposit request"
+                            >
+                              Cancel Request
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             onClick={() => handleStatusChange(payment)}
@@ -402,7 +481,7 @@ const AdminPayments = () => {
               >
                 Previous
               </Button>
-              <span style={{ padding: '0.5rem 1rem', background: '#fff', borderRadius: '8px' }}>
+              <span style={{ padding: '0.5rem 1rem', background: 'var(--card-bg)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
                 Page {currentPage} of {totalPages}
               </span>
               <Button
@@ -443,6 +522,7 @@ const AdminPayments = () => {
                 </span></p>
                 <p><strong>Method:</strong> {getMethodBadge(selectedPayment.payment_method)}</p>
                 <p><strong>Status:</strong> {getStatusBadge(selectedPayment.status)}</p>
+                <p><strong>Type:</strong> {selectedPayment.payment_type || 'N/A'}</p>
                 {selectedPayment.transaction_id && (
                   <p><strong>Transaction ID:</strong> <code>{selectedPayment.transaction_id}</code></p>
                 )}
@@ -486,6 +566,30 @@ const AdminPayments = () => {
           <Button color="secondary" onClick={() => setViewModalOpen(false)}>
             Close
           </Button>
+          {selectedPayment?.status === 'Completed' && (
+            <Button
+              style={{
+                background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)',
+                border: 'none',
+                color: '#fff'
+              }}
+              onClick={() => {
+                setViewModalOpen(false);
+                quickRefundToUser(selectedPayment);
+              }}
+            >
+              <FaUndo className="me-1" /> Refund to User
+            </Button>
+          )}
+          {selectedPayment?.status === 'Pending' &&
+            ['Resource', 'Reservation'].includes(selectedPayment.payment_type) && (
+              <Button color="warning" onClick={() => {
+                setViewModalOpen(false);
+                quickCancelPendingDeposit(selectedPayment);
+              }}>
+                Cancel Deposit Request
+              </Button>
+            )}
           <Button 
             color="primary" 
             onClick={() => {

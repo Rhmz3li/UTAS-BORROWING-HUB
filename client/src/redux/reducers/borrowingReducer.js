@@ -52,7 +52,7 @@ export const addBorrowing = createAsyncThunk("borrowing/addBorrowing", async (bo
     }
 });
 
-export const updateBorrowing = createAsyncThunk("borrowing/updateBorrowing", async ({id, borrowingData}) => {
+export const updateBorrowing = createAsyncThunk("borrowing/updateBorrowing", async ({ id, borrowingData }, { rejectWithValue }) => {
     try {
         const token = localStorage.getItem('token');
         const response = await axios.put(`http://localhost:5000/borrow/${id}/return`, borrowingData, {
@@ -60,7 +60,8 @@ export const updateBorrowing = createAsyncThunk("borrowing/updateBorrowing", asy
         });
         return response.data;
     } catch (error) {
-        throw error;
+        const msg = error.response?.data?.message || error.message || 'Failed to submit return';
+        return rejectWithValue(msg);
     }
 });
 

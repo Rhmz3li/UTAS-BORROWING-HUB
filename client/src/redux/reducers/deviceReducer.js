@@ -3,7 +3,11 @@ import axios from 'axios';
 
 export const fetchDevices = createAsyncThunk("devices/fetchDevices", async () => {
     try {
-        const response = await axios.get("http://localhost:5000/showDevices");
+        const token = localStorage.getItem('token');
+        const response = await axios.get("http://localhost:5000/resources", {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            params: { page: 1, limit: 10000 }
+        });
         return response.data;
     } catch (error) {
         throw error;
@@ -66,7 +70,8 @@ export const DeviceSlice = createSlice({
         .addCase(fetchDevices.fulfilled, (state, action) => {
             state.isLoading = false;
             state.isSuccess = true;
-            state.devices = action.payload?.data || action.payload || [];
+            const p = action.payload;
+            state.devices = Array.isArray(p?.data) ? p.data : Array.isArray(p) ? p : [];
         })
         .addCase(fetchDevices.rejected, (state, action) => {
             state.isLoading = false;

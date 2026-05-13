@@ -85,7 +85,7 @@ const NotificationSettings = () => {
   if (!user) return null;
 
   return (
-    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', padding: '2rem', transition: 'all 0.3s ease' }}>
+    <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
       <Container fluid className="py-4">
         <Row className="mb-4">
           <Col>
@@ -93,17 +93,17 @@ const NotificationSettings = () => {
               <Button color="link" className="me-3 p-0" onClick={() => navigate('/home')}>
                 <FaArrowLeft /> Back
               </Button>
-              <h2 className="mb-0 d-flex align-items-center gap-2">
+              <h2 className="mb-0 d-flex align-items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                 <FaBell /> Notification Settings
               </h2>
             </div>
           </Col>
         </Row>
 
-        <Card className="border-0 shadow-sm rounded-3 overflow-hidden">
-          <CardBody className="p-0">
+        <Card className="border-0 shadow-sm rounded-3 overflow-hidden" style={{ backgroundColor: 'var(--card-bg)' }}>
+          <CardBody className="p-0" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)' }}>
             <div className="p-4 pb-0">
-              <p className="text-muted mb-0 small">
+              <p className="mb-0 small" style={{ color: 'var(--text-secondary)' }}>
                 Choose which notifications you want and how to receive them: <strong>In-App</strong> (bell icon) and/or <strong>Email</strong>.
               </p>
             </div>
@@ -116,8 +116,8 @@ const NotificationSettings = () => {
               <>
                 {/* Header row */}
                 <div
-                  className="d-none d-md-flex align-items-center px-4 py-3 text-muted small text-uppercase fw-bold"
-                  style={{ background: 'rgba(0,0,0,.04)', borderBottom: '1px solid rgba(0,0,0,.06)' }}
+                  className="d-none d-md-flex align-items-center px-4 py-3 small text-uppercase fw-bold"
+                  style={{ background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}
                 >
                   <div style={{ flex: '1 1 50%' }}>Notification type</div>
                   <div className="d-flex align-items-center justify-content-center gap-4" style={{ flex: '0 0 220px' }}>
@@ -135,8 +135,8 @@ const NotificationSettings = () => {
                     key={key}
                     className="d-flex flex-wrap align-items-center px-4 py-3 gap-3"
                     style={{
-                      borderBottom: idx < NOTIFICATION_OPTIONS.length - 1 ? '1px solid rgba(0,0,0,.06)' : 'none',
-                      background: idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.02)'
+                      borderBottom: idx < NOTIFICATION_OPTIONS.length - 1 ? '1px solid var(--border-color)' : 'none',
+                      background: idx % 2 === 0 ? 'transparent' : 'var(--bg-tertiary)'
                     }}
                   >
                     <div className="d-flex align-items-center gap-3 flex-grow-1 min-w-0">
@@ -146,7 +146,7 @@ const NotificationSettings = () => {
                       >
                         <Icon size={18} />
                       </div>
-                      <span className="fw-medium text-dark">{label}</span>
+                      <span className="fw-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
                     </div>
                     <div className="d-flex align-items-center gap-4">
                       <label className="d-flex align-items-center gap-2 mb-0 cursor-pointer" style={{ cursor: 'pointer' }}>
@@ -156,7 +156,7 @@ const NotificationSettings = () => {
                           checked={!!(prefs[key] && prefs[key].inApp !== false)}
                           onChange={() => handleToggle(key, 'inApp')}
                         />
-                        <span className="small text-muted d-md-none">In-App</span>
+                        <span className="small d-md-none" style={{ color: 'var(--text-secondary)' }}>In-App</span>
                       </label>
                       <label className="d-flex align-items-center gap-2 mb-0 cursor-pointer" style={{ cursor: 'pointer' }}>
                         <Input
@@ -165,13 +165,13 @@ const NotificationSettings = () => {
                           checked={!!(prefs[key] && prefs[key].email !== false)}
                           onChange={() => handleToggle(key, 'email')}
                         />
-                        <span className="small text-muted d-md-none">Email</span>
+                        <span className="small d-md-none" style={{ color: 'var(--text-secondary)' }}>Email</span>
                       </label>
                     </div>
                   </div>
                 ))}
 
-                <div className="p-4 pt-3 d-flex justify-content-end" style={{ background: 'rgba(0,0,0,.02)', borderTop: '1px solid rgba(0,0,0,.06)' }}>
+                <div className="p-4 pt-3 d-flex justify-content-end" style={{ background: 'var(--bg-tertiary)', borderTop: '1px solid var(--border-color)' }}>
                   <Button color="primary" size="lg" className="rounded-pill px-4 shadow-sm" onClick={handleSave} disabled={saving}>
                     {saving ? <Spinner size="sm" className="me-2" /> : <FaSave className="me-2" />}
                     Save settings
@@ -179,7 +179,7 @@ const NotificationSettings = () => {
                 </div>
               </>
             ) : (
-              <p className="text-muted mb-0 p-4">Could not load settings. Try again later.</p>
+              <p className="mb-0 p-4" style={{ color: 'var(--text-secondary)' }}>Could not load settings. Try again later.</p>
             )}
           </CardBody>
         </Card>

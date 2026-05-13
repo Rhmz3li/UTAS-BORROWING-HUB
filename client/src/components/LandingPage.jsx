@@ -448,7 +448,7 @@ const LandingPage = () => {
 
                                 {/* Resource List */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0.75rem', borderRadius: '8px', background: '#f8f9fa' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-tertiary)' }}>
                                         <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#1976d2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
                                             <FaLaptop style={{ fontSize: '1.2rem' }} />
                                         </div>
@@ -465,7 +465,7 @@ const LandingPage = () => {
                                         }}>Available</span>
                                     </div>
 
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0.75rem', borderRadius: '8px', background: '#f8f9fa' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-tertiary)' }}>
                                         <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#1976d2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
                                             <FaMicroscope style={{ fontSize: '1.2rem' }} />
                                         </div>
@@ -482,7 +482,7 @@ const LandingPage = () => {
                                         }}>Borrowed</span>
                                     </div>
 
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0.75rem', borderRadius: '8px', background: '#f8f9fa' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-tertiary)' }}>
                                         <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#1976d2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
                                             <FaCamera style={{ fontSize: '1.2rem' }} />
                                         </div>
@@ -1123,7 +1123,7 @@ const LandingPage = () => {
 
             {/* User Comments/Testimonials Section */}
             <div ref={commentsRef} style={{ scrollMarginTop: '80px' }}>
-                <div style={{ paddingTop: '4rem', paddingBottom: '4rem', background: '#f8f9fa' }}>
+                <div style={{ paddingTop: '4rem', paddingBottom: '4rem', background: 'var(--bg-tertiary)' }}>
                     <Container>
                         <Row>
                             <Col className="text-center mb-5">
@@ -1464,10 +1464,11 @@ const LandingPage = () => {
 
             {/* Footer */}
             <footer style={{
-                background: 'linear-gradient(135deg, #f8f9fa 0%, #e3f2fd 50%, #fff3e0 100%)',
+                background: 'var(--bg-tertiary)',
                 padding: '4rem 0 2rem',
                 marginTop: '4rem',
-                borderTop: '1px solid #e0e0e0'
+                borderTop: '1px solid var(--border-color)',
+                color: 'var(--text-primary)'
             }}>
                 <Container>
                     <Row className="mb-4">
