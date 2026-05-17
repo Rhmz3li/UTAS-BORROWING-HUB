@@ -791,6 +791,52 @@ app.get("/resources", async (req, res) => {
     }
 });
 
+// GET single resource by id (catalog detail page; rejects non-ObjectId ids so /resources/scan/... is unaffected)
+app.get("/resources/:id", async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(404).json({ success: false, message: 'Resource not found' });
+        }
+
+        const resource = await ResourceModel.findById(req.params.id);
+        if (!resource) {
+            return res.status(404).json({ success: false, message: 'Resource not found' });
+        }
+
+        let userDepartment = null;
+        let userRole = null;
+        try {
+            const token = req.headers.authorization?.split(' ')[1];
+            if (token) {
+                const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+                const user = await UserModel.findById(decoded.id);
+                if (user) {
+                    userDepartment = user.department;
+                    userRole = user.role;
+                }
+            }
+        } catch (authError) {
+            /* optional auth — continue without department filter */
+        }
+
+        if (userDepartment && !['Admin', 'Assistant'].includes(userRole)) {
+            const resDept = (resource.department || '').trim();
+            const userDept = (userDepartment || '').trim();
+            if (resDept && userDept && resDept.toLowerCase() !== userDept.toLowerCase()) {
+                return res.status(404).json({ success: false, message: 'Resource not found' });
+            }
+        }
+
+        res.json({ success: true, data: resource });
+    } catch (error) {
+        console.error('Get resource by id error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to fetch resource'
+        });
+    }
+});
+
 app.get("/showDevices", async (req, res) => {
     try {
         const { status, category, search, page = 1, limit = 10 } = req.query;

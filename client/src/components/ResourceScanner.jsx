@@ -1,158 +1,189 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Modal, ModalHeader, ModalBody, ModalFooter, Button, Alert, Spinner } from 'reactstrap';
+import { Modal, ModalHeader, ModalBody, ModalFooter, Button, Alert, Spinner, FormGroup, Label, Input } from 'reactstrap';
 import { useNavigate } from 'react-router-dom';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import { createAndStartScanner, normalizeScanCode, shouldAcceptScan } from '../utils/scannerUtils';
 
 const SCANNER_DIV_ID = 'resource-qr-scanner';
 const API_BASE = 'http://localhost:5000';
 
-const SCAN_FORMATS = [
-  Html5QrcodeSupportedFormats.QR_CODE,
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.CODE_39,
-  Html5QrcodeSupportedFormats.CODE_93,
-  Html5QrcodeSupportedFormats.CODABAR,
-  Html5QrcodeSupportedFormats.ITF,
-  Html5QrcodeSupportedFormats.DATA_MATRIX,
-  Html5QrcodeSupportedFormats.EAN_13,
-  Html5QrcodeSupportedFormats.EAN_8,
-  Html5QrcodeSupportedFormats.UPC_A,
-  Html5QrcodeSupportedFormats.UPC_E,
-];
-
-function normalizeScanCode(raw) {
-  let s = String(raw ?? '')
-    .trim()
-    .replace(/[\u200B-\u200D\uFEFF]/g, '');
-  try {
-    s = s.normalize('NFC');
-  } catch (e) {
-    /* ignore */
-  }
-  return s;
-}
-
 const ResourceScanner = ({ isOpen, toggle, canOpenAddDeviceWhenUnknown = false }) => {
   const scannerRef = useRef(null);
   const processingScanRef = useRef(false);
+  const lastScanRef = useRef({ code: '', at: 0 });
+  const toggleRef = useRef(toggle);
+  const navigateRef = useRef(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
-  const [scanning, setScanning] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const lookupByCodeRef = useRef(null);
   const navigate = useNavigate();
 
+  toggleRef.current = toggle;
+  navigateRef.current = navigate;
+
   const stopScanner = async () => {
-    if (!scannerRef.current || !scanning) return;
-    try {
-      await scannerRef.current.stop();
-      scannerRef.current.clear();
-    } catch (e) {}
+    if (!scannerRef.current) return;
+    const instance = scannerRef.current;
     scannerRef.current = null;
-    setScanning(false);
+    try {
+      await instance.stop();
+      instance.clear();
+    } catch (e) {
+      /* already stopped */
+    }
   };
 
   useEffect(() => {
     if (!isOpen) {
+      processingScanRef.current = false;
+      lastScanRef.current = { code: '', at: 0 };
       stopScanner();
       setError(null);
+      setManualCode('');
+      setStarting(false);
       return;
     }
-    let mounted = true;
 
-    const startScan = async () => {
-      setStarting(true);
-      setError(null);
-      try {
-        const cameras = await Html5Qrcode.getCameras();
-        const cameraId = cameras?.length > 0 ? cameras[0].id : { facingMode: 'environment' };
-        if (!document.getElementById(SCANNER_DIV_ID) || !mounted) return;
+    let cancelled = false;
 
-        const html5QrCode = new Html5Qrcode(SCANNER_DIV_ID);
-        scannerRef.current = html5QrCode;
-        await html5QrCode.start(
-          cameraId,
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            formatsToSupport: SCAN_FORMATS,
-          },
-          (decodedText) => {
-            if (mounted && scannerRef.current) onScanSuccess(decodedText);
-          },
-          () => {}
-        );
-        if (mounted) setScanning(true);
-      } catch (err) {
-        if (mounted) {
-          setError(err?.message || 'Unable to open camera. Please check permissions.');
-          toast.error('Failed to start camera');
-        }
-      } finally {
-        if (mounted) setStarting(false);
-      }
-    };
-
-    const onScanSuccess = async (rawCode) => {
+    const processCode = async (rawCode) => {
       const code = normalizeScanCode(rawCode);
       if (!code || processingScanRef.current) return;
+      if (!shouldAcceptScan(lastScanRef, code)) return;
+
+      processingScanRef.current = true;
+      await stopScanner();
+
       const token = localStorage.getItem('token');
       if (!token) {
+        processingScanRef.current = false;
         toast.error('You must be logged in');
         return;
       }
-      processingScanRef.current = true;
+
       try {
         const res = await axios.get(`${API_BASE}/resources/scan/${encodeURIComponent(code)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.data?.success && res.data?.data?._id) {
-          await stopScanner();
-          toggle();
-          navigate(`/resources/${res.data.data._id}`);
-          toast.success('Resource found');
+          toggleRef.current();
+          if (canOpenAddDeviceWhenUnknown) {
+            navigateRef.current('/admin/resources', { state: { openEditResource: res.data.data } });
+            toast.success('Resource found — opening edit form');
+          } else {
+            navigateRef.current(`/resources/${res.data.data._id}`);
+            toast.success('Resource found');
+          }
         } else if (canOpenAddDeviceWhenUnknown) {
-          await stopScanner();
-          toggle();
-          navigate('/admin/resources', { state: { openAddFromScan: code } });
-          toast.info(`Code not found. Opening add device — same value set for barcode and QR.`);
+          toggleRef.current();
+          navigateRef.current('/admin/resources', { state: { openAddFromScan: code } });
+          toast.info('Code not found. Opening add device form.');
         } else {
           toast.error('No resource found for this code');
+          processingScanRef.current = false;
         }
       } catch (err) {
         if (canOpenAddDeviceWhenUnknown && err.response?.status === 404) {
-          await stopScanner();
-          toggle();
-          navigate('/admin/resources', { state: { openAddFromScan: code } });
-          toast.info(`Code not found. Opening add device — same value set for barcode and QR.`);
+          toggleRef.current();
+          navigateRef.current('/admin/resources', { state: { openAddFromScan: code } });
+          toast.info('Code not found. Opening add device form.');
         } else {
           toast.error(err.response?.data?.message || 'No resource found for this code');
+          processingScanRef.current = false;
+        }
+      }
+    };
+
+    lookupByCodeRef.current = processCode;
+
+    const startScan = async () => {
+      setStarting(true);
+      setError(null);
+      try {
+        if (cancelled || scannerRef.current) return;
+        const html5QrCode = await createAndStartScanner(SCANNER_DIV_ID, (decoded) => {
+          if (!cancelled) processCode(decoded);
+        });
+        if (cancelled) {
+          await html5QrCode.stop().catch(() => {});
+          return;
+        }
+        scannerRef.current = html5QrCode;
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || 'Unable to open camera. Allow camera access or enter the code manually below.');
+          toast.error('Failed to start camera');
         }
       } finally {
-        processingScanRef.current = false;
+        if (!cancelled) setStarting(false);
       }
     };
 
     startScan();
+
     return () => {
-      mounted = false;
+      cancelled = true;
+      lookupByCodeRef.current = null;
       stopScanner();
     };
-  }, [isOpen]);
+  }, [isOpen, canOpenAddDeviceWhenUnknown]);
 
   return (
     <Modal isOpen={isOpen} toggle={toggle} size="md" centered>
       <ModalHeader toggle={toggle}>Scan QR / Barcode – Find Resource</ModalHeader>
       <ModalBody>
-        <p className="small text-muted mb-2">Camera supports QR and common 1D barcodes (e.g. Code 128).</p>
+        <p className="small text-muted mb-2">
+          Use a printed QR label when possible. Scanning from another screen often fails. Or type the code below.
+        </p>
         {error && <Alert color="danger">{error}</Alert>}
-        {starting && (
-          <div className="text-center py-4">
-            <Spinner />
-            <p className="mt-2 mb-0">Starting camera...</p>
+        <div style={{ position: 'relative', minHeight: 280 }}>
+          <div
+            id={SCANNER_DIV_ID}
+            style={{ minHeight: 280, width: '100%', overflow: 'hidden', borderRadius: 8, background: '#111' }}
+          />
+          {starting && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(0,0,0,0.55)',
+                borderRadius: 8,
+                zIndex: 2,
+                pointerEvents: 'none',
+              }}
+            >
+              <Spinner color="light" />
+              <p className="mt-2 mb-0 text-white small">Starting camera...</p>
+            </div>
+          )}
+        </div>
+        <FormGroup className="mt-3 mb-0">
+          <Label className="small">Or enter barcode / QR value</Label>
+          <div className="d-flex gap-2">
+            <Input
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              placeholder="e.g. UBH-…"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && manualCode.trim()) lookupByCodeRef.current?.(manualCode);
+              }}
+            />
+            <Button
+              color="primary"
+              outline
+              disabled={!manualCode.trim() || processingScanRef.current}
+              onClick={() => lookupByCodeRef.current?.(manualCode)}
+            >
+              Look up
+            </Button>
           </div>
-        )}
-        <div id={SCANNER_DIV_ID} style={{ minHeight: starting ? 0 : 250, overflow: 'hidden' }} />
+        </FormGroup>
       </ModalBody>
       <ModalFooter>
         <Button color="secondary" onClick={toggle}>Cancel</Button>

@@ -88,6 +88,40 @@ const AdminResources = () => {
     toast.info(`Code "${scanned}" not found. Barcode and QR are filled — complete the form and save.`);
   }, [location.state, location.pathname, navigate]);
 
+  // Open edit modal when arriving from scan (View Details / Edit Resource)
+  useEffect(() => {
+    const resourceFromScan = location.state?.openEditResource;
+    const resourceId = location.state?.openEditResourceId;
+    if (!resourceFromScan && !resourceId) return;
+
+    navigate(location.pathname, { replace: true, state: {} });
+
+    const openEditFromScan = async () => {
+      if (resourceFromScan?._id) {
+        await handleEdit(resourceFromScan);
+        return;
+      }
+      const token = localStorage.getItem('token');
+      if (!token || !resourceId) return;
+      try {
+        const res = await axios.get(
+          `http://localhost:5000/resources/scan/${encodeURIComponent(String(resourceId))}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.data?.success && res.data?.data) {
+          await handleEdit(res.data.data);
+        } else {
+          toast.error('Resource not found');
+        }
+      } catch {
+        toast.error('Could not open resource for editing');
+      }
+    };
+
+    openEditFromScan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.openEditResource, location.state?.openEditResourceId]);
+
   const fetchAvailableCategories = async () => {
     try {
       const token = localStorage.getItem('token');

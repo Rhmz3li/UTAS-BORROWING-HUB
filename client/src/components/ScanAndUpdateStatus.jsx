@@ -1,38 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Modal, ModalHeader, ModalBody, ModalFooter, Button, Alert, Spinner, Card, CardBody, FormGroup, Label, Input } from 'reactstrap';
 import { useNavigate } from 'react-router-dom';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import { createAndStartScanner, normalizeScanCode, shouldAcceptScan } from '../utils/scannerUtils';
 
 const SCANNER_DIV_ID = 'scan-update-status-scanner';
 const API_BASE = 'http://localhost:5000';
-
-const SCAN_FORMATS = [
-  Html5QrcodeSupportedFormats.QR_CODE,
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.CODE_39,
-  Html5QrcodeSupportedFormats.CODE_93,
-  Html5QrcodeSupportedFormats.CODABAR,
-  Html5QrcodeSupportedFormats.ITF,
-  Html5QrcodeSupportedFormats.DATA_MATRIX,
-  Html5QrcodeSupportedFormats.EAN_13,
-  Html5QrcodeSupportedFormats.EAN_8,
-  Html5QrcodeSupportedFormats.UPC_A,
-  Html5QrcodeSupportedFormats.UPC_E,
-];
-
-function normalizeScanCode(raw) {
-  let s = String(raw ?? '')
-    .trim()
-    .replace(/[\u200B-\u200D\uFEFF]/g, '');
-  try {
-    s = s.normalize('NFC');
-  } catch (e) {
-    /* ignore */
-  }
-  return s;
-}
 
 const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
   const scannerRef = useRef(null);
@@ -46,17 +20,27 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
   const [returnModal, setReturnModal] = useState(false);
   const [conditionOnReturn, setConditionOnReturn] = useState('Good');
   const [loading, setLoading] = useState(false);
+  const [manualCode, setManualCode] = useState('');
   const canFinalizeBorrow = activeBorrow && ['Claimed', 'Active', 'Overdue', 'PendingReturn'].includes(activeBorrow.status);
   const navigate = useNavigate();
+  const lastScanRef = useRef({ code: '', at: 0 });
+  const toggleRef = useRef(toggle);
+  const navigateRef = useRef(navigate);
+
+  toggleRef.current = toggle;
+  navigateRef.current = navigate;
 
   const stopScanner = async () => {
-    if (!scannerRef.current || !scanning) return;
-    try {
-      await scannerRef.current.stop();
-      scannerRef.current.clear();
-    } catch (e) {}
+    if (!scannerRef.current) return;
+    const instance = scannerRef.current;
     scannerRef.current = null;
     setScanning(false);
+    try {
+      await instance.stop();
+      instance.clear();
+    } catch (e) {
+      /* already stopped */
+    }
   };
 
   const reset = () => {
@@ -66,7 +50,10 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
     setError(null);
     setReturnModal(false);
     setConditionOnReturn('Good');
+    setManualCode('');
   };
+
+  const lookupByCodeRef = useRef(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -75,83 +62,79 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       return;
     }
     if (step !== 'scan') return;
-    let mounted = true;
+    let cancelled = false;
 
-    const startScan = async () => {
-      setStarting(true);
-      setError(null);
-      try {
-        const cameras = await Html5Qrcode.getCameras();
-        const cameraId = cameras?.length > 0 ? cameras[0].id : { facingMode: 'environment' };
-        if (!document.getElementById(SCANNER_DIV_ID) || !mounted) return;
-
-        const html5QrCode = new Html5Qrcode(SCANNER_DIV_ID);
-        scannerRef.current = html5QrCode;
-        await html5QrCode.start(
-          cameraId,
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            formatsToSupport: SCAN_FORMATS,
-          },
-          (decodedText) => {
-            if (mounted && scannerRef.current) onScanSuccess(decodedText);
-          },
-          () => {}
-        );
-        if (mounted) setScanning(true);
-      } catch (err) {
-        if (mounted) {
-          setError(err?.message || 'Unable to open camera. Please check permissions.');
-          toast.error('Failed to start camera');
-        }
-      } finally {
-        if (mounted) setStarting(false);
-      }
-    };
-
-    const onScanSuccess = async (rawCode) => {
+    const processCode = async (rawCode) => {
       const code = normalizeScanCode(rawCode);
       if (!code || processingScanRef.current) return;
+      if (!shouldAcceptScan(lastScanRef, code)) return;
+
+      processingScanRef.current = true;
+      await stopScanner();
+
       const token = localStorage.getItem('token');
       if (!token) {
+        processingScanRef.current = false;
         toast.error('You must be logged in');
         return;
       }
-      processingScanRef.current = true;
+
       try {
         const res = await axios.get(`${API_BASE}/resources/scan/${encodeURIComponent(code)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.data?.success && res.data?.data) {
-          await stopScanner();
           setResource(res.data.data);
           setActiveBorrow(res.data.activeBorrow || null);
           setStep('result');
           setError(null);
         } else {
-          await stopScanner();
-          toggle();
-          navigate('/admin/resources', { state: { openAddFromScan: code } });
-          toast.info(`Code not found. Opening add device — same value for barcode and QR.`);
+          toggleRef.current();
+          navigateRef.current('/admin/resources', { state: { openAddFromScan: code } });
+          toast.info('Code not found. Opening add device form.');
         }
       } catch (err) {
         if (err.response?.status === 404) {
-          await stopScanner();
-          toggle();
-          navigate('/admin/resources', { state: { openAddFromScan: code } });
-          toast.info(`Code not found. Opening add device — same value for barcode and QR.`);
+          toggleRef.current();
+          navigateRef.current('/admin/resources', { state: { openAddFromScan: code } });
+          toast.info('Code not found. Opening add device form.');
         } else {
           toast.error(err.response?.data?.message || 'Scan failed. Please try again.');
+          processingScanRef.current = false;
+          if (!cancelled && !scannerRef.current) startScan();
         }
-      } finally {
-        processingScanRef.current = false;
       }
     };
 
+    const startScan = async () => {
+      setStarting(true);
+      setError(null);
+      try {
+        if (cancelled || scannerRef.current) return;
+        const html5QrCode = await createAndStartScanner(SCANNER_DIV_ID, (decoded) => {
+          if (!cancelled) processCode(decoded);
+        });
+        if (cancelled) {
+          await html5QrCode.stop().catch(() => {});
+          return;
+        }
+        scannerRef.current = html5QrCode;
+        setScanning(true);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || 'Unable to open camera. Allow camera access or enter the code manually below.');
+          toast.error('Failed to start camera');
+        }
+      } finally {
+        if (!cancelled) setStarting(false);
+      }
+    };
+
+    lookupByCodeRef.current = processCode;
     startScan();
     return () => {
-      mounted = false;
+      cancelled = true;
+      lookupByCodeRef.current = null;
       stopScanner();
     };
   }, [isOpen, step]);
@@ -236,10 +219,10 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
     }
   };
 
-  const goToDetail = () => {
+  const goToEditResource = () => {
     if (resource?._id) {
       toggle();
-      navigate(`/resources/${resource._id}`);
+      navigate('/admin/resources', { state: { openEditResource: resource } });
     }
   };
 
@@ -253,14 +236,54 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
           {step === 'scan' && (
             <>
               {error && <Alert color="danger">{error}</Alert>}
-              <p className="small text-muted mb-2">Scan a resource QR or barcode. Borrow and return actions update the system immediately.</p>
-              {starting && (
-                <div className="text-center py-4">
-                  <Spinner />
-                  <p className="mt-2 mb-0">Starting camera...</p>
+              <p className="small text-muted mb-2">
+                Use a printed QR label when possible. Scanning from another phone screen often fails. Or type the code below.
+              </p>
+              <div style={{ position: 'relative', minHeight: 280 }}>
+                <div
+                  id={SCANNER_DIV_ID}
+                  style={{ minHeight: 280, width: '100%', overflow: 'hidden', borderRadius: 8, background: '#111' }}
+                />
+                {starting && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(0,0,0,0.55)',
+                      borderRadius: 8,
+                      zIndex: 2,
+                    }}
+                  >
+                    <Spinner color="light" />
+                    <p className="mt-2 mb-0 text-white small">Starting camera...</p>
+                  </div>
+                )}
+              </div>
+              <FormGroup className="mt-3 mb-0">
+                <Label className="small">Or enter barcode / QR value</Label>
+                <div className="d-flex gap-2">
+                  <Input
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value)}
+                    placeholder="e.g. UBH-…"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && manualCode.trim()) lookupByCodeRef.current?.(manualCode);
+                    }}
+                  />
+                  <Button
+                    color="primary"
+                    outline
+                    disabled={!manualCode.trim()}
+                    onClick={() => lookupByCodeRef.current?.(manualCode)}
+                  >
+                    Look up
+                  </Button>
                 </div>
-              )}
-              <div id={SCANNER_DIV_ID} style={{ minHeight: starting ? 0 : 250, overflow: 'hidden' }} />
+              </FormGroup>
             </>
           )}
 
@@ -302,7 +325,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
                 )}
                 <Button color="warning" outline onClick={() => handleStatus('Maintenance')} disabled={loading}>Maintenance</Button>
                 <Button color="primary" outline onClick={() => handleStatus('Available')} disabled={loading}>Available</Button>
-                <Button color="secondary" outline onClick={goToDetail}>View Details</Button>
+                <Button color="secondary" outline onClick={goToEditResource}>Edit Resource</Button>
                 <Button color="light" outline onClick={() => { reset(); setStep('scan'); }}>Scan Another Resource</Button>
               </div>
             </>
