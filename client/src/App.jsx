@@ -22,6 +22,7 @@ import AdminPayments from './components/AdminPayments.jsx';
 import AdminPenalties from './components/AdminPenalties.jsx';
 import AdminReports from './components/AdminReports.jsx';
 import NotificationSettings from './components/NotificationSettings.jsx';
+import NotificationSoundPrompt from './components/NotificationSoundPrompt.jsx';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Container, Row, Col } from 'reactstrap';
 import Header from './components/Header.jsx';
@@ -50,6 +51,7 @@ function App() {
 
     return (
         <>
+            <NotificationSoundPrompt />
             <Routes>
                 {/* Public Routes */}
                 <Route path="/" element={<LandingPage />} />
@@ -166,6 +168,15 @@ function App() {
                             <Sidebar />
                             <AdminDashboard />
                         </>
+                    ) : email ? (
+                        <Navigate to="/home" />
+                    ) : (
+                        <Navigate to="/login" />
+                    )
+                } />
+                <Route path="/admin/categories" element={
+                    email && ['Admin', 'Assistant'].includes(role) ? (
+                        <Navigate to="/admin/resources" replace />
                     ) : email ? (
                         <Navigate to="/home" />
                     ) : (

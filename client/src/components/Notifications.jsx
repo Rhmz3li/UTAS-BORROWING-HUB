@@ -109,7 +109,7 @@ const Notifications = () => {
                                                         <Badge color="primary">New</Badge>
                                                     )}
                                                 </div>
-                                                <p className="mb-1" style={{ color: 'var(--text-secondary)' }}>{notification.message}</p>
+                                                <p className="mb-1" style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{notification.message}</p>
                                                 <small style={{ color: 'var(--text-secondary)' }}>
                                                     {notification.created_at ? new Date(notification.created_at).toLocaleString() : 'N/A'}
                                                 </small>

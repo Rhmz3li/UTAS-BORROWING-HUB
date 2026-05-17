@@ -8,12 +8,13 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import dns from 'dns';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import OpenAI from 'openai';
 import UserModel from './models/User.js';
-
-// Load environment variables
-dotenv.config();
 import ResourceModel from './models/Resource.js';
 import BorrowModel from './models/Borrow.js';
 import ReservationModel from './models/Reservation.js';
@@ -22,6 +23,11 @@ import PenaltyModel from './models/Penalty.js';
 import PaymentModel from './models/Payment.js';
 import FeedbackModel from './models/Feedback.js';
 import AnnouncementModel from './models/Announcement.js';
+import XLSX from 'xlsx';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Always load server/.env (not cwd), so Abi and DB keys work when started from repo root
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 let app = express();
 app.use(cors());
@@ -1062,6 +1068,14 @@ app.post("/resources", async (req, res) => {
         const barcode = req.body.barcode && req.body.barcode.trim() !== '' ? req.body.barcode.trim() : null;
         const qr_code = req.body.qr_code && req.body.qr_code.trim() !== '' ? req.body.qr_code.trim() : null;
 
+        if ((barcode || qr_code) && barcode !== qr_code) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    'Barcode and QR code must be the same value. Leave both empty or use identical text in both fields, or use Generate unique codes.'
+            });
+        }
+
         // Check for duplicate barcode only if a non-empty value is provided
         // null values are allowed multiple times with sparse unique index
         if (barcode) {
@@ -1219,6 +1233,93 @@ app.post("/resources", async (req, res) => {
     }
 });
 
+/** Unique label for barcode + QR (same value on both fields). */
+async function allocateUniqueResourceAssetCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    for (let attempt = 0; attempt < 50; attempt++) {
+        const buf = crypto.randomBytes(10);
+        let code = 'UBH-';
+        for (let i = 0; i < 10; i++) code += alphabet[buf[i] % alphabet.length];
+        const clash = await ResourceModel.findOne({
+            $or: [{ barcode: code }, { qr_code: code }]
+        })
+            .select('_id')
+            .lean();
+        if (!clash) return code;
+    }
+    throw new Error('Unable to generate a unique asset code');
+}
+
+// Generate / assign matching barcode + QR code (Admin/Assistant)
+app.post('/admin/resources/generate-codes', async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+        if (!user || !['Admin', 'Assistant'].includes(user.role)) {
+            return res.status(403).json({ success: false, message: 'Not authorized. Admin or Assistant role required.' });
+        }
+
+        const { resource_id, replace } = req.body || {};
+        const code = await allocateUniqueResourceAssetCode();
+
+        if (resource_id) {
+            const resource = await ResourceModel.findById(resource_id);
+            if (!resource) {
+                return res.status(404).json({ success: false, message: 'Resource not found' });
+            }
+            const hasCodes = !!(resource.barcode || resource.qr_code);
+            const openBorrowStatuses = [
+                'PendingApproval',
+                'Approved',
+                'Claimed',
+                'Active',
+                'Overdue',
+                'PendingReturn'
+            ];
+            const hasOpenBorrow = await BorrowModel.exists({
+                resource_id: resource._id,
+                status: { $in: openBorrowStatuses }
+            });
+            if (hasOpenBorrow && hasCodes) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        'Cannot replace barcode or QR while this resource has an active or pending borrow. Wait until it is returned first.'
+                });
+            }
+            if (hasCodes && !replace) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'This resource already has a barcode or QR value. Send replace: true to overwrite both with a new code.'
+                });
+            }
+            resource.barcode = code;
+            resource.qr_code = code;
+            resource.updated_at = Date.now();
+            await resource.save();
+            return res.status(200).json({
+                success: true,
+                message: 'Unique codes assigned to this resource.',
+                data: resource,
+                codes: { barcode: code, qr_code: code }
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Unique code generated. Paste into the form or save to a new resource.',
+            codes: { barcode: code, qr_code: code }
+        });
+    } catch (error) {
+        console.error('Generate resource codes error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Failed to generate codes' });
+    }
+});
+
 // Update resource (Admin/Assistant only)
 app.put("/resources/:id", async (req, res) => {
     try {
@@ -1278,6 +1379,46 @@ app.put("/resources/:id", async (req, res) => {
         }
         if (req.body.qr_code !== undefined) {
             qr_code = req.body.qr_code && req.body.qr_code.trim() !== '' ? req.body.qr_code.trim() : null;
+        }
+
+        const nextBarcode = req.body.barcode !== undefined ? barcode : resource.barcode;
+        const nextQr = req.body.qr_code !== undefined ? qr_code : resource.qr_code;
+        if (req.body.barcode !== undefined || req.body.qr_code !== undefined) {
+            const effB =
+                nextBarcode == null || String(nextBarcode).trim() === '' ? null : String(nextBarcode).trim();
+            const effQ = nextQr == null || String(nextQr).trim() === '' ? null : String(nextQr).trim();
+            if ((effB || effQ) && effB !== effQ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        'Barcode and QR code must be the same value. Leave both empty or use identical text in both fields, or use Generate unique codes.'
+                });
+            }
+        }
+        const identifiersChange =
+            (req.body.barcode !== undefined && nextBarcode !== resource.barcode) ||
+            (req.body.qr_code !== undefined && nextQr !== resource.qr_code);
+
+        if (identifiersChange) {
+            const openBorrowStatuses = [
+                'PendingApproval',
+                'Approved',
+                'Claimed',
+                'Active',
+                'Overdue',
+                'PendingReturn'
+            ];
+            const hasOpenBorrow = await BorrowModel.exists({
+                resource_id: resource._id,
+                status: { $in: openBorrowStatuses }
+            });
+            if (hasOpenBorrow) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        'Cannot change barcode or QR code while this resource has an active or pending borrow. Wait until it is returned or resolve the borrow request first.'
+                });
+            }
         }
 
         // Check for duplicate barcode only if a non-empty value is provided and different from current
@@ -1609,10 +1750,11 @@ app.post("/borrow/checkout", async (req, res) => {
         }
 
         // Email: notify user about submitted borrow request
-        await sendEmail({
-            to: user.email,
-            subject: 'Borrow Request Submitted – UTAS Borrowing Hub',
-            html: `<div style="${emailStyle}">${emailHeader}
+        if (await shouldSendEmailNotification(user._id, 'borrowApproval')) {
+            await sendEmail({
+                to: user.email,
+                subject: 'Borrow Request Submitted – UTAS Borrowing Hub',
+                html: `<div style="${emailStyle}">${emailHeader}
               <div style="padding:24px;">
                 <p>Dear ${user.full_name},</p>
                 <p>Your borrow request for <strong>${resource.name}</strong> has been submitted and is <strong>pending admin approval</strong>.</p>
@@ -1624,7 +1766,8 @@ app.post("/borrow/checkout", async (req, res) => {
                 </table>
                 <p>You will receive another email once your request is reviewed.</p>
               </div>${emailFooter}</div>`
-        });
+            });
+        }
 
         // Email: notify all admins about new borrow request
         for (const admin of admins) {
@@ -1706,8 +1849,11 @@ app.put("/borrow/:id/return", async (req, res) => {
             return res.status(500).json({ message: "Borrow record not found" });
         }
 
-        if (borrow.user_id.toString() !== user._id.toString() && !['Admin', 'Assistant'].includes(user.role)) {
-            return res.status(500).json({ message: "Not authorized" });
+        if (!['Admin', 'Assistant'].includes(user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only administrators or assistants can confirm a resource return. Please return the item at the borrowing hub.'
+            });
         }
 
         if (borrow.status === 'Returned' || borrow.status === 'Lost') {
@@ -1761,7 +1907,8 @@ app.put("/borrow/:id/return", async (req, res) => {
         }).populate('user_id');
 
         for (const reservation of pendingReservations) {
-            const uid = reservation.user_id?._id || reservation.user_id;
+            const resUserDoc = reservation.user_id;
+            const uid = resUserDoc?._id || reservation.user_id;
             if (uid && (await shouldSendInAppNotification(uid, 'reservationAvailable'))) {
                 await NotificationModel.create({
                     user_id: uid,
@@ -1770,6 +1917,22 @@ app.put("/borrow/:id/return", async (req, res) => {
                     type: 'Info',
                     related_type: 'Reservation',
                     related_id: reservation._id
+                });
+            }
+            if (
+                resUserDoc?.email &&
+                uid &&
+                (await shouldSendEmailNotification(uid, 'reservationAvailable'))
+            ) {
+                await sendEmail({
+                    to: resUserDoc.email,
+                    subject: `Resource available: ${resource.name} – UTAS Borrowing Hub`,
+                    html: `<div style="${emailStyle}">${emailHeader}
+              <div style="padding:24px;">
+                <p>Dear ${resUserDoc.full_name || 'User'},</p>
+                <p>The resource <strong>${resource.name}</strong> you reserved is now <strong>available for pickup</strong>.</p>
+                <p>Please check your reservations in the hub and arrange pickup.</p>
+              </div>${emailFooter}</div>`
                 });
             }
         }
@@ -1835,6 +1998,40 @@ app.put("/borrow/:id/return", async (req, res) => {
                     related_type: 'Penalty',
                     related_id: penalty._id
                 });
+            }
+
+            const penalizedUserBrief = await UserModel.findById(borrowUserId).select('full_name email');
+            const penaltyAdmins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+            for (const adm of penaltyAdmins) {
+                await NotificationModel.create({
+                    user_id: adm._id,
+                    title: 'Penalty Applied',
+                    message: `${penalizedUserBrief?.full_name || 'User'} (${penalizedUserBrief?.email || ''}): ${fineAmount} OMR — ${description}. Resource: ${resource.name}.`,
+                    type: 'Warning',
+                    related_type: 'Penalty',
+                    related_id: penalty._id
+                });
+            }
+
+            if (borrowUserId && (await shouldSendEmailNotification(borrowUserId, 'penalty'))) {
+                const penalizedUser = await UserModel.findById(borrowUserId).select('email full_name');
+                if (penalizedUser?.email) {
+                    await sendEmail({
+                        to: penalizedUser.email,
+                        subject: 'Penalty applied – UTAS Borrowing Hub',
+                        html: `<div style="${emailStyle}">${emailHeader}
+              <div style="padding:24px;">
+                <p>Dear ${penalizedUser.full_name || 'User'},</p>
+                <p>A penalty of <strong>${fineAmount} OMR</strong> has been applied to your account.</p>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                  <tr><td style="padding:6px;color:#555;">Reason</td><td style="padding:6px;">${description}</td></tr>
+                  <tr><td style="padding:6px;color:#555;">Type</td><td style="padding:6px;">${penaltyType}</td></tr>
+                  <tr><td style="padding:6px;color:#555;">Amount</td><td style="padding:6px;font-weight:bold;">${fineAmount} OMR</td></tr>
+                </table>
+                <p>Please sign in to the hub and settle your penalty from the Penalties page.</p>
+              </div>${emailFooter}</div>`
+                    });
+                }
             }
         }
 
@@ -1918,6 +2115,36 @@ app.put("/borrow/:id/return", async (req, res) => {
 });
 
 // ==================== RESERVATIONS ROUTES ====================
+
+/** If linked Reservation deposit payment is already Completed, align reservation.payment_status (fixes legacy rows). */
+async function syncReservationDepositPaidFromPayments(reservations) {
+    const list = Array.isArray(reservations) ? reservations : [];
+    const needSync = list.filter(
+        (r) =>
+            r.requires_payment &&
+            (r.payment_amount || 0) > 0 &&
+            r.payment_status !== 'Paid' &&
+            r.payment_id
+    );
+    if (!needSync.length) return;
+    const ids = [...new Set(needSync.map((r) => r.payment_id))];
+    const payments = await PaymentModel.find({ _id: { $in: ids } }).lean();
+    const payMap = new Map(payments.map((p) => [String(p._id), p]));
+    const updates = [];
+    for (const r of needSync) {
+        const p = payMap.get(String(r.payment_id));
+        if (p && p.payment_type === 'Reservation' && p.status === 'Completed') {
+            r.payment_status = 'Paid';
+            updates.push(
+                ReservationModel.updateOne(
+                    { _id: r._id },
+                    { $set: { payment_status: 'Paid', updated_at: new Date() } }
+                )
+            );
+        }
+    }
+    if (updates.length) await Promise.all(updates);
+}
 
 app.post("/reservations", async (req, res) => {
     try {
@@ -2091,16 +2318,36 @@ app.post("/reservations", async (req, res) => {
         }
         await newReservation.save();
 
+        if (paymentId) {
+            await PaymentModel.findByIdAndUpdate(paymentId, {
+                reservation_id: newReservation._id,
+                updated_at: Date.now()
+            });
+        }
+
         // RESERVE: Don't decrease quantity - only reserve for future pickup
         // Quantity will be decreased when reservation is confirmed and picked up
         // This allows the resource to remain available for others until pickup date
         // No quantity change here - reservation is just a booking for future date
 
+        const reserveAdmins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+        for (const adm of reserveAdmins) {
+            await NotificationModel.create({
+                user_id: adm._id,
+                title: 'New Reservation Request',
+                message: `${user.full_name} (${user.email}) reserved ${resource.name}. Pickup: ${pickupDateObj.toLocaleDateString()}.`,
+                type: 'Info',
+                related_type: 'Reservation',
+                related_id: newReservation._id
+            });
+        }
+
         // Email: notify user about reservation submission
-        await sendEmail({
-            to: user.email,
-            subject: 'Reservation Submitted – UTAS Borrowing Hub',
-            html: `<div style="${emailStyle}">${emailHeader}
+        if (await shouldSendEmailNotification(user._id, 'reservationConfirmation')) {
+            await sendEmail({
+                to: user.email,
+                subject: 'Reservation Submitted – UTAS Borrowing Hub',
+                html: `<div style="${emailStyle}">${emailHeader}
               <div style="padding:24px;">
                 <p>Dear ${user.full_name},</p>
                 <p>Your reservation request has been <strong>submitted</strong> and is pending confirmation.</p>
@@ -2111,10 +2358,10 @@ app.post("/reservations", async (req, res) => {
                 </table>
                 <p>You will receive another email once the reservation is confirmed by an admin.</p>
               </div>${emailFooter}</div>`
-        });
+            });
+        }
 
         // Email: notify admins about new reservation
-        const reserveAdmins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
         for (const adm of reserveAdmins) {
             await sendEmail({
                 to: adm.email,
@@ -2159,6 +2406,8 @@ app.get("/reservations/my-reservations", async (req, res) => {
         const reservations = await ReservationModel.find(query)
             .populate('resource_id', 'name category')
             .sort({ reservation_date: -1 });
+
+        await syncReservationDepositPaidFromPayments(reservations);
 
         res.send(reservations);
     } catch (error) {
@@ -2208,7 +2457,7 @@ app.put("/reservations/:id/cancel", async (req, res) => {
         // Email: notify user about cancellation
         const cancelUser = await UserModel.findById(decoded.id);
         const cancelResource = resource || await ResourceModel.findById(reservation.resource_id);
-        if (cancelUser?.email) {
+        if (cancelUser?.email && (await shouldSendEmailNotification(cancelUser._id, 'reservationConfirmation'))) {
             await sendEmail({
                 to: cancelUser.email,
                 subject: 'Reservation Cancelled – UTAS Borrowing Hub',
@@ -2263,6 +2512,8 @@ app.get("/admin/reservations", async (req, res) => {
             .limit(limit * 1)
             .skip((page - 1) * limit)
             .sort({ reservation_date: -1 });
+
+        await syncReservationDepositPaidFromPayments(reservations);
 
         const total = await ReservationModel.countDocuments(query);
 
@@ -2391,7 +2642,8 @@ app.put("/admin/reservations/:id/confirm", async (req, res) => {
 
         // Email: notify user reservation is confirmed
         const reservedUser = reservation.user_id;
-        if (reservedUser?.email) {
+        const reservedUserId = reservedUser?._id || resUserId;
+        if (reservedUser?.email && reservedUserId && (await shouldSendEmailNotification(reservedUserId, 'reservationConfirmation'))) {
             await sendEmail({
                 to: reservedUser.email,
                 subject: 'Reservation Confirmed – UTAS Borrowing Hub',
@@ -2773,7 +3025,7 @@ app.put("/admin/borrows/:id/approve", async (req, res) => {
 
         // Email: notify user borrow was approved
         const approvedUser = borrow.user_id;
-        if (approvedUser?.email) {
+        if (approvedUser?.email && borrowUserIdApproved && (await shouldSendEmailNotification(borrowUserIdApproved, 'borrowApproval'))) {
             await sendEmail({
                 to: approvedUser.email,
                 subject: 'Borrow Request Approved – UTAS Borrowing Hub',
@@ -2858,7 +3110,7 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
 
         // Email: notify user borrow was rejected
         const rejectedUser = borrow.user_id;
-        if (rejectedUser?.email) {
+        if (rejectedUser?.email && rejectUserId && (await shouldSendEmailNotification(rejectUserId, 'borrowRejection'))) {
             await sendEmail({
                 to: rejectedUser.email,
                 subject: 'Borrow Request Rejected – UTAS Borrowing Hub',
@@ -3295,6 +3547,9 @@ app.post("/payments", async (req, res) => {
             paymentData.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
             paymentData.card_holder = card_details.card_holder || '';
             paymentData.card_expiry = card_details.expiry_date || '';
+            if (card_details.card_network) {
+                paymentData.card_network = String(card_details.card_network).trim().slice(0, 40);
+            }
             // Never store CVV - it's only for transaction processing
         }
 
@@ -3446,6 +3701,9 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
             payment.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
             payment.card_holder = card_details.card_holder || '';
             payment.card_expiry = card_details.expiry_date || '';
+            if (card_details.card_network) {
+                payment.card_network = String(card_details.card_network).trim().slice(0, 40);
+            }
         }
 
         payment.status = 'Completed';
@@ -3469,6 +3727,20 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
                 relatedBorrow.payment_status = 'Paid';
                 relatedBorrow.updated_at = Date.now();
                 await relatedBorrow.save();
+            }
+        }
+
+        if (payment.payment_type === 'Reservation') {
+            let relatedReservation = payment.reservation_id
+                ? await ReservationModel.findById(payment.reservation_id)
+                : null;
+            if (!relatedReservation) {
+                relatedReservation = await ReservationModel.findOne({ payment_id: payment._id });
+            }
+            if (relatedReservation) {
+                relatedReservation.payment_status = 'Paid';
+                relatedReservation.updated_at = Date.now();
+                await relatedReservation.save();
             }
         }
 
@@ -3553,6 +3825,20 @@ app.put("/admin/payments/:id/status", async (req, res) => {
                     relatedBorrow.payment_status = 'Paid';
                     relatedBorrow.updated_at = Date.now();
                     await relatedBorrow.save();
+                }
+            }
+
+            if (payment.payment_type === 'Reservation') {
+                let relatedReservation = payment.reservation_id
+                    ? await ReservationModel.findById(payment.reservation_id)
+                    : null;
+                if (!relatedReservation) {
+                    relatedReservation = await ReservationModel.findOne({ payment_id: payment._id });
+                }
+                if (relatedReservation) {
+                    relatedReservation.payment_status = 'Paid';
+                    relatedReservation.updated_at = Date.now();
+                    await relatedReservation.save();
                 }
             }
         } else if (status === 'Failed' && oldStatus === 'Completed') {
@@ -3978,6 +4264,27 @@ async function runOverdueBorrowCheck() {
                     });
                 }
             }
+
+            // Email once when borrow first becomes overdue (same scheduler pass as status flip)
+            if (await shouldSendEmailNotification(b.user_id, 'dueDateReminder')) {
+                const overdueUser = await UserModel.findById(b.user_id).select('email full_name');
+                if (overdueUser?.email) {
+                    await sendEmail({
+                        to: overdueUser.email,
+                        subject: 'Borrow overdue – UTAS Borrowing Hub',
+                        html: `<div style="${emailStyle}">${emailHeader}
+              <div style="padding:24px;">
+                <p>Dear ${overdueUser.full_name || 'User'},</p>
+                <p>${message}</p>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                  <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${resource?.name || 'Resource'}</td></tr>
+                  <tr><td style="padding:6px;color:#555;">Due date</td><td style="padding:6px;">${b.due_date.toLocaleDateString()}</td></tr>
+                </table>
+                <p>Please return the item as soon as possible to avoid further penalties.</p>
+              </div>${emailFooter}</div>`
+                    });
+                }
+            }
         }
     } catch (err) {
         console.error('Overdue borrow check failed:', err);
@@ -4073,6 +4380,15 @@ async function shouldSendInAppNotification(userId, preferenceKey) {
         ? { ...def, ...u.notificationPreferences } : def;
     const p = prefs[preferenceKey];
     return !p || p.inApp !== false;
+}
+
+async function shouldSendEmailNotification(userId, preferenceKey) {
+    const u = await UserModel.findById(userId).select('notificationPreferences');
+    const def = getDefaultNotificationPreferences();
+    const prefs = u?.notificationPreferences && typeof u.notificationPreferences === 'object'
+        ? { ...def, ...u.notificationPreferences } : def;
+    const p = prefs[preferenceKey];
+    return !p || p.email !== false;
 }
 
 app.get("/profile/notification-settings", async (req, res) => {
@@ -4261,24 +4577,48 @@ app.get("/resources/scan/:code", async (req, res) => {
             return res.status(401).json({ message: 'Not authorized' });
         }
 
-        const { code } = req.params;
+        let code = String(req.params.code ?? '')
+            .trim()
+            .replace(/[\u200B-\u200D\uFEFF]/g, '');
+        if (code.length > 256) {
+            code = code.slice(0, 256);
+        }
+        try {
+            code = code.normalize('NFC');
+        } catch (e) {
+            /* ignore invalid unicode in older environments */
+        }
+        if (!code) {
+            return res.status(400).json({ success: false, message: 'Missing or empty scan code' });
+        }
+
+        const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const exactNoCase = new RegExp(`^${escaped}$`, 'i');
+
         let resource = await ResourceModel.findOne({
-            $or: [{ barcode: code }, { qr_code: code }]
+            $or: [{ barcode: exactNoCase }, { qr_code: exactNoCase }]
         });
         // Fallback: if code is 24 hex chars, treat as MongoDB _id (e.g. printed QR with _id)
         if (!resource && /^[a-fA-F0-9]{24}$/.test(code)) {
             resource = await ResourceModel.findById(code);
+        }
+        // Fallback: asset tag stored as resource name (only when unambiguous)
+        if (!resource) {
+            const byName = await ResourceModel.find({ name: exactNoCase }).limit(2).select('_id');
+            if (byName.length === 1) {
+                resource = await ResourceModel.findById(byName[0]._id);
+            }
         }
 
         if (!resource) {
             return res.status(404).json({ success: false, message: "Resource not found" });
         }
 
-        // For admin/assistant: include active borrow (Active or Overdue) for scan & update status
+        // For staff: include in-flight borrow so scan UI can confirm return / see status immediately
         let activeBorrow = null;
         activeBorrow = await BorrowModel.findOne({
             resource_id: resource._id,
-            status: { $in: ['Active', 'Overdue'] }
+            status: { $in: ['Approved', 'Claimed', 'Active', 'Overdue', 'PendingReturn'] }
         })
             .populate('user_id', 'full_name email student_id')
             .sort({ borrow_date: -1 })
@@ -4649,6 +4989,473 @@ app.get("/admin/calendar", async (req, res) => {
     }
 });
 
+// ==================== AI ASSISTANT (ABI) ====================
+
+const ABI_SYSTEM_PROMPT = `You are Abi, the AI Chatbot for Assistance inside the UTAS Borrowing Hub web application.
+Your main job for hub-related questions is FAQ-style help: borrowing rules, return deadlines and due dates, resource availability, reservations, payments, returns, notifications, and profile — always grounded in the verified facts below.
+You may still answer brief general questions (study tips, technology, everyday topics) when the user is not asking about the hub.
+Answer clearly, factually, and in well-formed sentences.
+
+Language rules (critical — follow strictly):
+- If the user writes in English, or mostly in English, reply in clear natural English only.
+- If the user writes in Arabic, reply in clear Modern Standard Arabic only.
+- If the user explicitly asks for English (examples: "in English please", "speak English", "بالإنجليزي", "انجليزي"), your entire reply must be in English only, even if earlier turns were Arabic.
+- Use exactly one primary language per reply. Do not mix Arabic and English in the same sentence unless the user explicitly asked for bilingual text.
+- Do not insert random words from other languages (no German, French, Vietnamese, Hindi/Devanagari, etc.) unless the user quoted them or asked for them.
+- Use correct letters for the chosen language only; avoid gibberish, invented words, and "word salad".
+
+Product-specific answers (critical):
+- When the question is about how UTAS Borrowing Hub works (menus, pages, steps, rules shown in the app), use ONLY the facts in the "Verified app facts" block below. Do not invent extra screens, fees, deadlines, university policies, or legal text that are not stated there.
+- If the user needs a detail that is not in that block, say you are not sure and tell them which in-app area to open (use the path names from the block, e.g. /payments) or to contact hub staff for campus-specific policy — unless a "[LIVE CATALOG SNAPSHOT]" or "[LIVE MY BORROWS SNAPSHOT]" block is attached to the user message, in which case use that block for lists or personal due dates respectively.
+- For general knowledge unrelated to this app, you may answer from general knowledge as usual.`;
+
+const ABI_HUB_KNOWLEDGE = `Verified app facts (UTAS Borrowing Hub — student/staff web app):
+
+Public (no login): Landing "/", login "/login", register "/register", forgot password "/forgot-password", reset password "/reset-password". Registration and password reset use UTAS email domain @utas.edu.om where the app enforces it.
+
+After login, users see a sidebar. Main student/staff routes: Home "/home", Resources catalog "/resources", single resource "/resources/:id", My Borrows "/my-borrows", Reservations "/reservations", Notifications "/notifications", Payments "/payments", Penalties "/penalties", Profile "/profile", Notification settings "/notification-settings".
+
+Roles: "Admin" and "Assistant" use admin pages. Shared admin routes include "/admin/dashboard", "/admin/resources", "/admin/borrows", "/admin/reservations", "/admin/payments", "/admin/penalties". Only "Admin" may use "/admin/users" and "/admin/reports". Regular students/staff are sent to "/home" and cannot open admin routes.
+
+Borrowing: From Resources or a resource detail page, choose an available item, open Borrow, accept terms and conditions, set the due/borrow date as the UI asks. If a refundable security deposit is required, pick a payment method; for Card, the app creates a payment record and the user completes card payment from the Payments page, then staff/admin review. Card flow: user finishes payment in Payments; status becomes Paid and admin is notified. If no card deposit is required, the request still goes through admin approval as designed.
+
+Reservations: From Resources or detail, Reserve, set pickup and expiry dates, accept terms. If a card deposit is required, pay via Payments before admin review.
+
+Returns: My Borrows → active borrow → request return. Physical return must be confirmed by hub staff in the system before it is fully completed.
+
+Notifications: Page "/notifications" shows approvals, rejections, payment events, returns, refunds, and other system messages. "/notification-settings" controls notification preferences where implemented.
+
+Payments: "/payments" lists payment records and supports completing required card payments.
+
+Penalties: "/penalties" shows penalty information when the account has penalties.
+
+Department rule: If a resource has a "department" field set, only users whose profile department matches that resource's department can borrow or reserve it. Admin and Assistant roles bypass this restriction.
+
+Resources list may be filtered by category/college on Home. Resource location in messages defaults to text like "IT Borrowing Hub - Lab 2" when the resource has no custom location.
+
+Home can show announcements from admins. Users may submit feedback/reviews from the Home UI where the review action is offered.
+
+Scanning: Sidebar may expose QR/barcode scan tools for staff/admin workflows (borrow/return/resource management) where the role allows.
+
+Availability: Resource detail can check date availability via the app's availability check before confirming a borrow date.
+
+Live catalog for Abi: If the user's message asks to list, show, or enumerate resources/devices (including "per department" / "كل قسم"), or asks what types/kinds of devices exist (e.g. "what type laptop you have?", "what laptops are available?", "do you have laptops?"), the server may append a "[LIVE CATALOG SNAPSHOT]" block with real rows from the database. Answer only from that snapshot, grouped by its "##" section headers (department or college). Never claim you lack access or that you cannot see the list when that block is present.
+
+My borrows for Abi: If the user's message is about their own loan (return date, how many days left, overdue, "I borrowed", "استعارة"), the server may append a "[LIVE MY BORROWS SNAPSHOT]" block with that user's borrow rows (with resource names and due_date). Answer using those dates only; explain days remaining using the calendar summary lines.`;
+
+const ABI_FULL_SYSTEM_PROMPT = `${ABI_SYSTEM_PROMPT}\n\n${ABI_HUB_KNOWLEDGE}`;
+
+/** Free local LLM via https://ollama.com — set USE_OLLAMA=true in server/.env */
+async function abiCompleteWithOllama(systemPrompt, userMessage) {
+    const base = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
+    const model = process.env.OLLAMA_MODEL || 'llama3.2:1b';
+    const ollamaTemp = Number.isFinite(Number(process.env.OLLAMA_TEMPERATURE))
+        ? Math.min(2, Math.max(0, Number(process.env.OLLAMA_TEMPERATURE)))
+        : 0.35;
+    const controller = new AbortController();
+    let timeoutMs = Math.min(Math.max(Number(process.env.OLLAMA_TIMEOUT_MS) || 120000, 5000), 900000);
+    if (userMessage.includes('LIVE CATALOG SNAPSHOT') || userMessage.includes('LIVE MY BORROWS')) {
+        timeoutMs = Math.max(timeoutMs, 300000);
+    }
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(`${base}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userMessage }
+                ],
+                stream: false,
+                options: {
+                    temperature: ollamaTemp,
+                    top_p: 0.9,
+                    repeat_penalty: 1.12,
+                    num_predict: 1200
+                }
+            })
+        });
+        const rawText = await res.text();
+        let data;
+        try {
+            data = JSON.parse(rawText);
+        } catch {
+            const err = new Error(`Ollama returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 200)}`);
+            err.status = res.status;
+            throw err;
+        }
+        if (!res.ok) {
+            const bodyErr = typeof data?.error === 'string' ? data.error : data?.error?.message;
+            const err = new Error(bodyErr || rawText.slice(0, 300) || `Ollama HTTP ${res.status}`);
+            err.status = res.status;
+            throw err;
+        }
+        return (data?.message?.content || '').trim();
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/** User-facing hint when Ollama fails (connection vs model runner crash). */
+function abiOllamaFailureMessage(baseUrl, model, cause) {
+    const causeStr = String(cause || '').trim();
+    if (/abort|aborted/i.test(causeStr)) {
+        return (
+            `Ollama stopped before finishing (request timed out or was cancelled). Model: ${model}. ` +
+            `Fix: in server/.env set OLLAMA_TIMEOUT_MS=600000 (10 min) or higher for big catalog questions; lower ABI_CATALOG_MAX_ITEMS (e.g. 60) and ABI_CATALOG_MAX_CHARS; keep the Ollama app running. ` +
+            `If OPENROUTER_API_KEY or OPENAI_API_KEY is set, the server can fall back when Ollama fails. Technical: ${causeStr.slice(0, 200)} / انتهت مهلة Ollama: زد OLLAMA_TIMEOUT_MS أو قلّل حجم لقطة الموارد`
+        );
+    }
+    const runnerCrash =
+        /exit code|terminated|llama runner|process has terminated|runner process|cuda|gguf|vram|out of memory|cuda error|metal error|vk_error/i.test(
+            causeStr
+        );
+    if (runnerCrash) {
+        return (
+            `Ollama model crashed while running "${model}" (often not enough VRAM/RAM or a driver issue). ` +
+            `Try a smaller model: run "ollama pull phi3" then set OLLAMA_MODEL=phi3 in server/.env (or try llama3.2:1b). ` +
+            `Run "ollama run ${model}" in a terminal to see the full error. Update Ollama and GPU drivers. ` +
+            `Technical: ${causeStr.slice(0, 200)} / تعطل تشغيل النموذج: جرّب phi3 أو llama3.2:1b، أو عطّل USE_OLLAMA واستخدم OpenRouter (OPENROUTER_API_KEY) أو OpenAI إن وُجد مفتاح.`
+        );
+    }
+    return (
+        `Cannot reach Ollama (${baseUrl}). On Windows: open the Ollama app from the Start menu, then run: ollama pull ${model} . ` +
+        `If Ollama runs elsewhere, set OLLAMA_BASE_URL. Technical: ${causeStr.slice(0, 220) || 'connection failed'} / شغّل تطبيق Ollama، ثم ollama pull ${model}`
+    );
+}
+
+/** Reinforce English-only when user asks; helps small local models follow the request. */
+function abiAugmentUserMessageForLanguage(message) {
+    if (/\b(in english|english please|speak english|reply in english|only english|use english|بالإنجليزي|بالانجليزي|انجليزي)\b/i.test(message)) {
+        return `${message}\n\n[Abi: Your reply for this turn must be in English only — clear sentences, no Arabic or other languages.]`;
+    }
+    return message;
+}
+
+/** User wants an inventory-style answer from the live catalog. */
+function abiWantsResourceCatalog(message) {
+    const t = message.toLowerCase();
+    const en =
+        /\b(list|show|all|catalog|enumerate|display|give me)\b[\s\S]{0,80}\b(resources?|devices?|equipment|items?)\b/i.test(t) ||
+        /\b(resources?|devices?|equipment)\b[\s\S]{0,80}\b(list|catalog|all|every|each|per department|by department|grouped)\b/i.test(t) ||
+        /\b(what|which)\b[\s\S]{0,50}\b(resources?|devices?)\b[\s\S]{0,60}\b(available|borrow|in the hub|in the system)\b/i.test(t) ||
+        // "What type laptop you have?", "what laptops are there?", "do you have laptops?"
+        /\bwhat\b[\s\S]{0,120}\b(laptop|laptops|notebook|chromebook|macbook|device|devices|equipment|resource|resources|item|items)\b/i.test(t) ||
+        /\b(what|which)\s+(kind|type|sort|kinds|types)\s+of\b[\s\S]{0,100}\b(laptop|laptops|notebook|device|devices|equipment|resources?)\b/i.test(t) ||
+        /\b(do you have|have you got|have you|is there|are there|got any)\b[\s\S]{0,120}\b(laptop|laptops|notebook|device|devices|equipment|resources?)\b/i.test(t) ||
+        /\b(show|list|give)\s+me\b[\s\S]{0,80}\b(laptop|laptops|devices?|equipment|resources?)\b/i.test(t) ||
+        /\b(laptop|laptops|notebook|chromebook)\b[\s\S]{0,60}\b(available|borrow|have|you have|in stock|list)\b/i.test(t);
+    const ar =
+        /قائمة|كل الموارد|قائمه الموارد|عرض الموارد|ما هي الموارد|الموارد المتاحة|موارد كل قسم|لكل قسم|حسب القسم|بالأقسام|الأقسام|الاقسام|اذكر الموارد|اذكر الاجهزة|الأجهزة المتاحة|لابتوب|لاب توب|حاسوب محمول|ما نوع|أي أجهزة|أي موارد/i.test(
+            message
+        );
+    return !!(en || ar);
+}
+
+/** Pull a compact catalog from DB so Abi can list real resources (grouped by department/college). */
+async function abiBuildLiveCatalogAppendix(message) {
+    if (!abiWantsResourceCatalog(message)) return '';
+    const maxItems = Math.min(250, Math.max(10, Number(process.env.ABI_CATALOG_MAX_ITEMS) || 80));
+    const laptopFocus =
+        /\b(laptop|laptops|notebook|chromebook|macbook|ultrabook)\b/i.test(message) ||
+        /\b(لابتوب|لاب توب|حاسوب محمول)\b/i.test(message);
+
+    const selectFields = 'name category college department status available_quantity total_quantity description';
+    const sortSpec = { department: 1, college: 1, name: 1 };
+
+    let rows;
+    if (laptopFocus) {
+        const laptopRegex = /laptop|notebook|chromebook|macbook|ultrabook|حاسوب|لابتوب|لاب توب/i;
+        rows = await ResourceModel.find({
+            $or: [
+                { name: laptopRegex },
+                { description: laptopRegex },
+                { category: { $regex: /^(IT|Electronics)$/i } }
+            ]
+        })
+            .select(selectFields)
+            .sort(sortSpec)
+            .limit(maxItems)
+            .lean();
+        if (!rows.length) {
+            rows = await ResourceModel.find({})
+                .select(selectFields)
+                .sort(sortSpec)
+                .limit(maxItems)
+                .lean();
+        }
+    } else {
+        rows = await ResourceModel.find({})
+            .select(selectFields)
+            .sort(sortSpec)
+            .limit(maxItems)
+            .lean();
+    }
+
+    if (!rows.length) {
+        return '[LIVE CATALOG SNAPSHOT: The database returned no resource rows. Say that the catalog is empty or you could not load items.]';
+    }
+
+    const groups = new Map();
+    for (const r of rows) {
+        const dept = (r.department && String(r.department).trim()) || '';
+        const coll = (r.college && String(r.college).trim()) || '';
+        const key = dept || coll || 'General (no department set)';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(r);
+    }
+
+    const lines = [
+        '[LIVE CATALOG SNAPSHOT — data from the UTAS Borrowing Hub database right now. Use ONLY this list to answer. Do not say you lack access. Present clearly grouped by the ## section headers (department or college).]',
+        laptopFocus
+            ? '[FILTER HINT: User asked about laptops / similar devices — prioritize rows whose name or category clearly match laptops or IT-style devices; if the list includes non-laptops, say those are other IT resources in the same snapshot.]'
+            : '',
+        `Total resources in this snapshot: ${rows.length} (may be truncated if the catalog is large).`,
+        ''
+    ].filter(Boolean);
+
+    const sortedKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    for (const key of sortedKeys) {
+        lines.push(`## ${key}`);
+        for (const r of groups.get(key)) {
+            const avail = r.available_quantity ?? 0;
+            const tot = r.total_quantity ?? 1;
+            lines.push(
+                `- ${r.name} | category: ${r.category} | status: ${r.status} | available: ${avail}/${tot}`
+            );
+        }
+        lines.push('');
+    }
+
+    let out = lines.join('\n');
+    const maxChars = Math.min(28000, Math.max(2000, Number(process.env.ABI_CATALOG_MAX_CHARS) || 10000));
+    if (out.length > maxChars) {
+        out = `${out.slice(0, maxChars)}\n…(snapshot truncated; ask the user to open Resources in the app for the full searchable catalog.)`;
+    }
+    return out;
+}
+
+function abiDueSummaryLine(dueDate) {
+    const due = new Date(dueDate);
+    const now = new Date();
+    const diffMs = due.getTime() - now.getTime();
+    const days = Math.ceil(diffMs / 86400000);
+    if (days > 1) return `${days} calendar days remaining until the due date`;
+    if (days === 1) return '1 calendar day remaining until the due date';
+    if (days === 0) return 'due today — user should return per hub rules and use My Borrows if a return request is needed';
+    return `overdue by ${Math.abs(days)} calendar day(s) — user should return as soon as possible`;
+}
+
+function abiWantsMyBorrowsContext(message) {
+    const t = message.toLowerCase();
+    const en =
+        /\b(my borrow|my borrows|i borrowed|i have borrowed|i have borrow|i've borrowed|when (do|should|must) i return|how many days.*return|days.*(return|left)|due date|is it due|overdue|pending return|active borrow|return it back|return this)\b/i.test(t) ||
+        /\b(how long|how many days)\b[\s\S]{0,60}\b(borrow|borrowed|return|due|keep|have|back)\b/i.test(t) ||
+        /\bthis resource\b[\s\S]{0,100}\b(return|days|due|borrow|back)\b/i.test(t);
+    const ar =
+        /استعارت|استعار|مستعير|مُستعير|استعارة|إرجاع|ارجاع|متى أرجع|متى ارجع|كم يوم|عدد أيام|موعد الإرجاع|موعد الارجاع|تاريخ الإرجاع|التسليم|الاستحقاق|تأخير|متأخر|هذا المورد|هذا الجهاز/i.test(
+            message
+        );
+    return !!(en || ar);
+}
+
+/** Current user's borrow rows so Abi can answer due dates / days left accurately. */
+async function abiBuildMyBorrowsAppendix(message, userId) {
+    if (!abiWantsMyBorrowsContext(message)) return '';
+    const statuses = ['Active', 'Claimed', 'PendingReturn', 'Overdue', 'PendingApproval'];
+    const borrows = await BorrowModel.find({ user_id: userId, status: { $in: statuses } })
+        .populate('resource_id', 'name max_borrow_days category')
+        .sort({ due_date: 1 })
+        .limit(40)
+        .lean();
+
+    if (!borrows.length) {
+        return '[LIVE MY BORROWS SNAPSHOT: No borrow rows in Active / Pending approval / Pending return / Overdue for this user. Suggest opening My Borrows in the app to confirm history.]';
+    }
+
+    const lines = [
+        '[LIVE MY BORROWS SNAPSHOT — database rows for this logged-in user only. Use them to answer how many days until return, due dates, overdue status, and device names. Do not invent borrows.]',
+        ''
+    ];
+    for (const b of borrows) {
+        const res = b.resource_id;
+        const resName = res?.name || '(unknown resource)';
+        const maxBorrow = res?.max_borrow_days ?? 'n/a';
+        const dueStr = b.due_date ? new Date(b.due_date).toISOString().slice(0, 10) : 'n/a';
+        const borrowStr = b.borrow_date ? new Date(b.borrow_date).toISOString().slice(0, 10) : 'n/a';
+        lines.push(`- Resource: ${resName}`);
+        lines.push(`  borrow status: ${b.status}`);
+        lines.push(`  borrow_date: ${borrowStr}`);
+        lines.push(`  due_date (return by): ${dueStr}`);
+        lines.push(`  borrow_duration_days (stored on record): ${b.borrow_duration_days ?? 'n/a'}; resource max_borrow_days: ${maxBorrow}`);
+        lines.push(`  calendar vs now: ${b.due_date ? abiDueSummaryLine(b.due_date) : 'n/a'}`);
+        lines.push('');
+    }
+    return lines.join('\n');
+}
+
+/** OpenAI-compatible chat (direct OpenAI or OpenRouter https://openrouter.ai ). */
+async function abiChatCompletionCompatible({ apiKey, baseURL, model, systemPrompt, userContent }) {
+    const temperature = Number.isFinite(Number(process.env.OPENAI_TEMPERATURE))
+        ? Math.min(2, Math.max(0, Number(process.env.OPENAI_TEMPERATURE)))
+        : 0.45;
+    const isOpenRouter = typeof baseURL === 'string' && baseURL.includes('openrouter.ai');
+    const client = new OpenAI({
+        apiKey,
+        ...(baseURL ? { baseURL: baseURL.replace(/\/$/, '') } : {}),
+        ...(isOpenRouter
+            ? {
+                  defaultHeaders: {
+                      'HTTP-Referer':
+                          process.env.OPENROUTER_HTTP_REFERER ||
+                          process.env.FRONTEND_URL ||
+                          'http://localhost:3000',
+                      'X-Title': process.env.OPENROUTER_APP_TITLE || 'UTAS Borrowing Hub'
+                  }
+              }
+            : {})
+    });
+    const completion = await client.chat.completions.create({
+        model,
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+        ],
+        max_tokens: 1200,
+        temperature
+    });
+    return (completion.choices?.[0]?.message?.content || '').trim();
+}
+
+app.post("/assistant/abi-chat", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
+        const raw = req.body?.message;
+        const message = typeof raw === 'string' ? raw.trim() : '';
+        if (!message) {
+            return res.status(400).json({ success: false, message: 'Message is required' });
+        }
+        if (message.length > 12000) {
+            return res.status(400).json({ success: false, message: 'Message is too long' });
+        }
+
+        const useOllama = ['1', 'true', 'yes'].includes(String(process.env.USE_OLLAMA || '').toLowerCase());
+        const openaiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+        const openrouterApiKey = String(process.env.OPENROUTER_API_KEY || '').trim();
+        const openrouterBase =
+            String(process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '') || 'https://openrouter.ai/api/v1';
+        const openrouterModel = process.env.OPENROUTER_MODEL || 'inclusionai/ring-2.6-1t:free';
+        const hasCloudFallback = !!(openrouterApiKey || openaiApiKey);
+
+        const modelUserMessage = abiAugmentUserMessageForLanguage(message);
+        const appendixParts = [];
+        const catalogAppendix = await abiBuildLiveCatalogAppendix(message);
+        if (catalogAppendix) appendixParts.push(catalogAppendix);
+        const borrowsAppendix = await abiBuildMyBorrowsAppendix(message, user._id);
+        if (borrowsAppendix) appendixParts.push(borrowsAppendix);
+        const sentUserMessage =
+            appendixParts.length > 0
+                ? `${modelUserMessage}\n\n---\n\n${appendixParts.join('\n\n---\n\n')}`
+                : modelUserMessage;
+
+        let reply = '';
+
+        if (useOllama) {
+            try {
+                reply = await abiCompleteWithOllama(ABI_FULL_SYSTEM_PROMPT, sentUserMessage);
+            } catch (ollamaErr) {
+                console.error('Abi Ollama error:', ollamaErr);
+                if (!hasCloudFallback) {
+                    const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
+                    const model = process.env.OLLAMA_MODEL || 'llama3.2:1b';
+                    const cause = String(ollamaErr?.message || ollamaErr || '').trim();
+                    return res.status(503).json({
+                        success: false,
+                        message: abiOllamaFailureMessage(baseUrl, model, cause)
+                    });
+                }
+                console.warn('Abi: Ollama failed; trying OpenRouter / OpenAI.', ollamaErr?.message);
+            }
+        }
+
+        if (!reply && openrouterApiKey) {
+            try {
+                reply = await abiChatCompletionCompatible({
+                    apiKey: openrouterApiKey,
+                    baseURL: openrouterBase,
+                    model: openrouterModel,
+                    systemPrompt: ABI_FULL_SYSTEM_PROMPT,
+                    userContent: sentUserMessage
+                });
+            } catch (orErr) {
+                console.warn('Abi: OpenRouter request failed.', orErr?.message || orErr);
+            }
+        }
+
+        if (!reply && openaiApiKey) {
+            try {
+                reply = await abiChatCompletionCompatible({
+                    apiKey: openaiApiKey,
+                    baseURL: undefined,
+                    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                    systemPrompt: ABI_FULL_SYSTEM_PROMPT,
+                    userContent: sentUserMessage
+                });
+            } catch (oaErr) {
+                console.warn('Abi: direct OpenAI request failed.', oaErr?.message || oaErr);
+            }
+        }
+
+        if (!reply) {
+            if (!useOllama && !hasCloudFallback) {
+                return res.status(503).json({
+                    success: false,
+                    message:
+                        'Abi chat is not configured. Add OPENROUTER_API_KEY (https://openrouter.ai) and OPENROUTER_MODEL, or OPENAI_API_KEY, or set USE_OLLAMA=true with a local Ollama model. Restart the server after editing server/.env. / أضف OPENROUTER_API_KEY أو OPENAI_API_KEY أو USE_OLLAMA=true'
+                });
+            }
+            return res.status(502).json({ success: false, message: 'No reply from the language model.' });
+        }
+
+        res.json({ success: true, data: { reply } });
+    } catch (error) {
+        console.error('Abi chat error:', error);
+        const httpStatus = error?.status;
+        if (httpStatus === 429) {
+            return res.status(429).json({
+                success: false,
+                message:
+                    'Rate or quota limit (429) from the model provider. If you use OpenRouter, check credits at https://openrouter.ai/credits ; for OpenAI see https://platform.openai.com/account/billing — then try again. / تحقق من الرصيد في OpenRouter أو OpenAI'
+            });
+        }
+        if (httpStatus === 401) {
+            return res.status(502).json({
+                success: false,
+                message:
+                    'Invalid API key (401). Check OPENROUTER_API_KEY or OPENAI_API_KEY in server/.env. / تحقق من مفتاح OpenRouter أو OpenAI'
+            });
+        }
+        const msg = error?.message || 'Chat request failed';
+        return res.status(typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 600 ? httpStatus : 500).json({
+            success: false,
+            message: msg
+        });
+    }
+});
+
 // ==================== FEEDBACK ====================
 
 app.get("/admin/feedback", async (req, res) => {
@@ -4726,16 +5533,21 @@ app.put("/admin/feedback/:id/respond", async (req, res) => {
 
         const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
         const user = await UserModel.findById(decoded.id);
-        
+
         if (!['Admin', 'Assistant'].includes(user.role)) {
-            return res.status(403).json({ message: "Not authorized" });
+            return res.status(403).json({ message: 'Not authorized' });
         }
 
         const { response, status } = req.body;
+        const trimmedResponse = typeof response === 'string' ? response.trim() : '';
+        if (!trimmedResponse) {
+            return res.status(400).json({ success: false, message: 'Response text is required' });
+        }
+
         const feedback = await FeedbackModel.findByIdAndUpdate(
             req.params.id,
             {
-                admin_response: response,
+                admin_response: trimmedResponse,
                 status: status || 'Reviewed',
                 responded_by: user._id,
                 updated_at: Date.now()
@@ -4745,6 +5557,24 @@ app.put("/admin/feedback/:id/respond", async (req, res) => {
 
         if (!feedback) {
             return res.status(404).json({ success: false, message: 'Feedback not found' });
+        }
+
+        try {
+            const recipientId = feedback.user_id?._id || feedback.user_id;
+            if (recipientId) {
+                const adminName = user.full_name || user.email || 'Administrator';
+                const excerpt =
+                    trimmedResponse.length > 1500 ? `${trimmedResponse.slice(0, 1500)}…` : trimmedResponse;
+                await NotificationModel.create({
+                    user_id: recipientId,
+                    title: 'Reply to your feedback',
+                    message: `${adminName}:\n\n${excerpt}`,
+                    type: 'Success',
+                    related_type: 'System'
+                });
+            }
+        } catch (notifyErr) {
+            console.error('Feedback user notification error:', notifyErr);
         }
 
         res.json({ success: true, data: feedback });
@@ -4771,13 +5601,17 @@ app.get("/announcements", async (req, res) => {
             return res.status(401).json({ success: false, message: 'User not found' });
         }
 
-        // Filter announcements based on target_audience
+        // Match audience to app roles (User.role uses "Student", not "Students")
+        const audienceOr = [{ target_audience: 'All' }];
+        if (user.role === 'Student') {
+            audienceOr.push({ target_audience: 'Student' }, { target_audience: 'Students' });
+        } else {
+            audienceOr.push({ target_audience: user.role });
+        }
+
         const query = {
-            $or: [
-                { target_audience: 'All' },
-                { target_audience: user.role },
-                ...(user.department ? [{ target_audience: user.department }] : [])
-            ]
+            is_active: { $ne: false },
+            $or: audienceOr
         };
 
         const announcements = await AnnouncementModel.find(query)
@@ -4801,7 +5635,11 @@ app.get("/admin/announcements", async (req, res) => {
 
         const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
         const user = await UserModel.findById(decoded.id);
-        
+
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
         if (!['Admin', 'Assistant'].includes(user.role)) {
             return res.status(403).json({ message: "Not authorized" });
         }
@@ -4826,26 +5664,52 @@ app.post("/admin/announcements", async (req, res) => {
 
         const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
         const user = await UserModel.findById(decoded.id);
-        
+
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
         if (!['Admin', 'Assistant'].includes(user.role)) {
             return res.status(403).json({ message: "Not authorized" });
         }
 
-        const { title, message, priority, target_audience } = req.body;
+        const { title, message, priority, target_audience } = req.body || {};
+        const titleTrim = typeof title === 'string' ? title.trim() : '';
+        const messageTrim = typeof message === 'string' ? message.trim() : '';
+        if (!titleTrim || !messageTrim) {
+            return res.status(400).json({
+                success: false,
+                message: 'Title and message are required'
+            });
+        }
+
+        const allowedPriority = ['Low', 'Normal', 'Medium', 'High'];
+        const p = allowedPriority.includes(priority) ? priority : 'Normal';
+
+        let ta = typeof target_audience === 'string' ? target_audience.trim() : 'All';
+        if (ta === 'Students') ta = 'Student';
+        const allowedAudience = ['All', 'Student', 'Staff', 'Admin', 'Assistant'];
+        if (!allowedAudience.includes(ta)) ta = 'All';
 
         const announcement = new AnnouncementModel({
-            title,
-            message,
-            priority: priority || 'Normal',
-            target_audience: target_audience || 'All',
+            title: titleTrim,
+            message: messageTrim,
+            priority: p,
+            target_audience: ta,
             created_by: user._id
         });
 
         await announcement.save();
 
-        res.json({ success: true, data: announcement });
+        res.status(201).json({ success: true, data: announcement });
     } catch (error) {
         console.error('Create announcement error:', error);
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors || {})
+                .map((e) => e.message)
+                .join(', ');
+            return res.status(400).json({ success: false, message: messages || error.message });
+        }
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -4929,38 +5793,154 @@ app.get("/admin/reports/export", async (req, res) => {
         const borrows = await BorrowModel.find(baseFilter)
             .populate('user_id', 'full_name email department role')
             .populate('resource_id', 'name category status barcode qr_code')
-            .sort({ borrow_date: -1 });
+            .sort({ borrow_date: -1 })
+            .limit(200);
+
+        const fmtDate = (d) => {
+            if (!d) return 'N/A';
+            const t = new Date(d).getTime();
+            return Number.isNaN(t) ? 'N/A' : new Date(d).toISOString().slice(0, 10);
+        };
 
         const reportData = {
             generated_at: new Date().toISOString(),
             period: { start: startDate || 'All', end: endDate || 'All' },
             total_borrows: borrows.length,
-            borrows: borrows.map(b => ({
+            borrows: borrows.map((b) => ({
                 user: b.user_id?.full_name || 'N/A',
+                email: b.user_id?.email || '',
+                department: b.user_id?.department || '',
+                role: b.user_id?.role || '',
                 resource: b.resource_id?.name || 'N/A',
                 category: b.resource_id?.category || 'N/A',
-                borrow_date: b.borrow_date,
-                due_date: b.due_date,
-                return_date: b.return_date,
-                status: b.status
+                resource_status: b.resource_id?.status || '',
+                barcode: b.resource_id?.barcode || '',
+                borrow_date: fmtDate(b.borrow_date),
+                due_date: fmtDate(b.due_date),
+                return_date: b.return_date ? fmtDate(b.return_date) : 'N/A',
+                status: b.status,
+                payment_status: b.payment_status || ''
             }))
         };
 
+        const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
         if (format === 'csv') {
-            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
             res.setHeader('Content-Disposition', `attachment; filename=report_${Date.now()}.csv`);
-            
-            let csv = 'User,Resource,Category,Borrow Date,Due Date,Return Date,Status\n';
-            reportData.borrows.forEach(b => {
-                csv += `"${b.user}","${b.resource}","${b.category}","${b.borrow_date}","${b.due_date}","${b.return_date || 'N/A'}","${b.status}"\n`;
+
+            let csv =
+                '\uFEFFUser,Email,Department,Role,Resource,Category,ResourceStatus,Barcode,BorrowDate,DueDate,ReturnDate,Status,PaymentStatus\n';
+            reportData.borrows.forEach((b) => {
+                csv += [
+                    csvEscape(b.user),
+                    csvEscape(b.email),
+                    csvEscape(b.department),
+                    csvEscape(b.role),
+                    csvEscape(b.resource),
+                    csvEscape(b.category),
+                    csvEscape(b.resource_status),
+                    csvEscape(b.barcode),
+                    csvEscape(b.borrow_date),
+                    csvEscape(b.due_date),
+                    csvEscape(b.return_date),
+                    csvEscape(b.status),
+                    csvEscape(b.payment_status)
+                ].join(',');
+                csv += '\n';
             });
-            
+
             return res.send(csv);
-        } else {
-            res.setHeader('Content-Type', 'application/json');
+        }
+
+        if (format === 'xlsx' || format === 'xls') {
+            const [totalUsers, totalResources] = await Promise.all([
+                UserModel.countDocuments({}),
+                ResourceModel.countDocuments({})
+            ]);
+
+            const statusCounts = borrows.reduce((acc, b) => {
+                acc[b.status] = (acc[b.status] || 0) + 1;
+                return acc;
+            }, {});
+
+            const summaryRows = [
+                { Metric: 'Generated (UTC)', Value: reportData.generated_at },
+                { Metric: 'Period start', Value: String(startDate || 'All') },
+                { Metric: 'Period end', Value: String(endDate || 'All') },
+                { Metric: 'Users (total in system)', Value: totalUsers },
+                { Metric: 'Resources (total in system)', Value: totalResources },
+                { Metric: 'Borrow rows (this export)', Value: borrows.length },
+                ...Object.keys(statusCounts)
+                    .sort()
+                    .map((k) => ({ Metric: `Borrow status: ${k}`, Value: statusCounts[k] }))
+            ];
+
+            const detailRows = borrows.map((b) => ({
+                User: b.user_id?.full_name || 'N/A',
+                Email: b.user_id?.email || '',
+                Department: b.user_id?.department || '',
+                Role: b.user_id?.role || '',
+                Resource: b.resource_id?.name || 'N/A',
+                Category: b.resource_id?.category || '',
+                ResourceStatus: b.resource_id?.status || '',
+                Barcode: b.resource_id?.barcode || '',
+                QRCode: b.resource_id?.qr_code || '',
+                BorrowDate: fmtDate(b.borrow_date),
+                DueDate: fmtDate(b.due_date),
+                ReturnDate: b.return_date ? fmtDate(b.return_date) : 'N/A',
+                Status: b.status,
+                PaymentStatus: b.payment_status || ''
+            }));
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+            XLSX.utils.book_append_sheet(
+                wb,
+                XLSX.utils.json_to_sheet(
+                    detailRows.length ? detailRows : [{ User: '', Resource: '', Status: 'No borrow rows for filters' }]
+                ),
+                'Borrows'
+            );
+
+            const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader('Content-Disposition', `attachment; filename=report_${Date.now()}.xlsx`);
+            return res.send(Buffer.from(buf));
+        }
+
+        if (format === 'json') {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
             res.setHeader('Content-Disposition', `attachment; filename=report_${Date.now()}.json`);
             return res.json(reportData);
         }
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename=report_${Date.now()}.csv`);
+        let csvFallback =
+            '\uFEFFUser,Email,Department,Role,Resource,Category,ResourceStatus,Barcode,BorrowDate,DueDate,ReturnDate,Status,PaymentStatus\n';
+        reportData.borrows.forEach((b) => {
+            csvFallback += [
+                csvEscape(b.user),
+                csvEscape(b.email),
+                csvEscape(b.department),
+                csvEscape(b.role),
+                csvEscape(b.resource),
+                csvEscape(b.category),
+                csvEscape(b.resource_status),
+                csvEscape(b.barcode),
+                csvEscape(b.borrow_date),
+                csvEscape(b.due_date),
+                csvEscape(b.return_date),
+                csvEscape(b.status),
+                csvEscape(b.payment_status)
+            ].join(',');
+            csvFallback += '\n';
+        });
+        return res.send(csvFallback);
     } catch (error) {
         console.error('Export error:', error);
         res.status(500).json({ success: false, message: error.message });
@@ -4978,6 +5958,15 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 5000;
 const MONGO_CONNECT_TIMEOUT_MS = Number(process.env.MONGO_CONNECT_TIMEOUT_MS || 10000);
 
+function configureMongoDnsIfNeeded() {
+    const raw = process.env.MONGO_DNS_SERVERS;
+    if (!raw || !raw.trim()) return;
+    const servers = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (servers.length > 0) {
+        dns.setServers(servers);
+    }
+}
+
 async function connectMongoOrExit() {
     const mongoUri =
         (process.env.MONGODB_URI && process.env.MONGODB_URI.trim()) ||
@@ -4992,6 +5981,7 @@ async function connectMongoOrExit() {
     }
 
     mongoose.set('bufferCommands', false);
+    configureMongoDnsIfNeeded();
 
     try {
         await mongoose.connect(mongoUri, {
@@ -5002,9 +5992,26 @@ async function connectMongoOrExit() {
         console.error('\n❌ Cannot connect to MongoDB. The API will not start.');
         console.error(`   URI host starts with: ${mongoUri.replace(/^[^:]+:[^@]+@/, '***:***@').slice(0, 80)}…`);
         console.error(`   ${err.message}`);
+        console.error('\nFix checklist (most common first):');
         console.error(
-            '\nIf you see DNS or ECONNREFUSED errors, check your network/firewall, Atlas IP allow list, and that the URI is correct.'
+            '   1) MongoDB Atlas → Network Access → add your current public IP (or 0.0.0.0/0 for dev only).'
         );
+        console.error('      https://www.mongodb.com/docs/atlas/security-ip-access-list/');
+        console.error('   2) Confirm username/password in the URI (Database Access user, not Atlas UI login).');
+        console.error('   3) VPN / firewall / corporate network blocking outbound 27017 to Atlas.');
+        console.error(
+            '   4) Local dev without Atlas: run MongoDB locally and set MONGODB_URI=mongodb://127.0.0.1:27017/UTAS-BORROWING-HUB'
+        );
+        console.error(
+            `   5) Increase wait time if slow network: MONGO_CONNECT_TIMEOUT_MS=${Math.max(MONGO_CONNECT_TIMEOUT_MS, 30000)}`
+        );
+        if (/querySrv\s+ECONNREFUSED/i.test(err.message)) {
+            console.error(
+                '   6) querySrv ECONNREFUSED: your router/DNS may block SRV lookups from Node. Add to server/.env:'
+            );
+            console.error('      MONGO_DNS_SERVERS=8.8.8.8,1.1.1.1');
+            console.error('      Or set Windows DNS to 8.8.8.8 / 1.1.1.1, then restart the terminal.');
+        }
         process.exit(1);
     }
 }

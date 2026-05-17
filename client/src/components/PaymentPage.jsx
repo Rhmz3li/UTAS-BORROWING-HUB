@@ -5,6 +5,16 @@ import { useSelector } from "react-redux";
 import axios from 'axios';
 import { FaCreditCard, FaCheckCircle, FaClock, FaTimesCircle, FaArrowLeft, FaReceipt, FaDollarSign } from 'react-icons/fa';
 import { toast } from 'react-toastify';
+import { CARD_NETWORK_META } from '../constants/cardNetworkOptions';
+import { generateClientTransactionId } from '../utils/generateClientTransactionId';
+import {
+    formatPanInput,
+    maxPanDigitsForNetwork,
+    inferCardNetworkFromPanDigits,
+    getEffectiveCardNetwork,
+    validateCardNumberForNetwork,
+    validateCvvMcVisa
+} from '../utils/cardValidation';
 
 const Payments = () => {
     const navigate = useNavigate();
@@ -17,12 +27,12 @@ const Payments = () => {
     const [selectedPayment, setSelectedPayment] = useState(null);
     const [pendingAutoOpenPaymentId, setPendingAutoOpenPaymentId] = useState(location.state?.openPaymentId || null);
     const [payData, setPayData] = useState({
+        card_network: 'Visa',
         card_number: '',
         card_holder: '',
         expiry_date: '',
         cvv: '',
-        transaction_id: '',
-        cash_notes: ''
+        transaction_id: ''
     });
 
     useEffect(() => {
@@ -69,60 +79,18 @@ const Payments = () => {
     const openPayModal = (payment) => {
         setSelectedPayment(payment);
         setPayData({
+            card_network: '',
             card_number: '',
             card_holder: '',
             expiry_date: '',
             cvv: '',
-            transaction_id: '',
+            transaction_id: generateClientTransactionId(),
             cash_notes: ''
         });
         setPayModalOpen(true);
     };
 
-    const passesLuhnCheck = (cardNumber) => {
-        const digits = String(cardNumber || '').replace(/\D/g, '');
-        if (digits.length < 13 || digits.length > 19) return false;
-
-        let sum = 0;
-        let shouldDouble = false;
-        for (let i = digits.length - 1; i >= 0; i -= 1) {
-            let digit = parseInt(digits.charAt(i), 10);
-            if (Number.isNaN(digit)) return false;
-            if (shouldDouble) {
-                digit *= 2;
-                if (digit > 9) digit -= 9;
-            }
-            sum += digit;
-            shouldDouble = !shouldDouble;
-        }
-
-        return sum % 10 === 0;
-    };
-
-    const detectCardType = (cardNumber) => {
-        const digits = String(cardNumber || '').replace(/\D/g, '');
-        if (!digits) return null;
-
-        if (/^4/.test(digits)) {
-            return { label: 'Visa', color: '#1a1f71', bg: '#e8edff' };
-        }
-
-        if (/^(5[1-5]|2(2[2-9]|[3-6]\d|7[01]|720))/.test(digits)) {
-            return { label: 'MasterCard', color: '#c62828', bg: '#ffebee' };
-        }
-
-        if (/^3[47]/.test(digits)) {
-            return { label: 'American Express', color: '#006fcf', bg: '#e3f2fd' };
-        }
-
-        if (/^(6011|65|64[4-9])/.test(digits)) {
-            return { label: 'Discover', color: '#ef6c00', bg: '#fff3e0' };
-        }
-
-        return { label: 'Card type not recognized yet', color: 'var(--text-secondary)', bg: 'var(--bg-tertiary)' };
-    };
-
-    const cardType = detectCardType(payData.card_number);
+    const selectedCardMeta = payData.card_network ? CARD_NETWORK_META[payData.card_network] : null;
 
     const handleConfirmPayDeposit = async () => {
         if (!selectedPayment) return;
@@ -153,10 +121,13 @@ const Payments = () => {
             return;
         }
 
-        // Card: validate and send card details only
-        const digitsOnly = payData.card_number.replace(/\s/g, '');
-        if (!passesLuhnCheck(digitsOnly)) {
-            toast.error('Please enter a valid card number');
+        if (!payData.card_network) {
+            toast.error('Please select your card type');
+            return;
+        }
+        const panCheck = validateCardNumberForNetwork(payData.card_number, payData.card_network);
+        if (!panCheck.ok) {
+            toast.error(panCheck.message);
             return;
         }
         if (!/^[A-Za-z][A-Za-z\s.'-]{1,}$/.test(payData.card_holder.trim())) {
@@ -181,10 +152,14 @@ const Payments = () => {
             toast.error('Card expiry date cannot be in the past');
             return;
         }
-        if (!/^\d{3,4}$/.test(payData.cvv || '')) {
-            toast.error('Please enter a valid 3 or 4 digit CVV');
+        const cvvCheck = validateCvvMcVisa(payData.cvv);
+        if (!cvvCheck.ok) {
+            toast.error(cvvCheck.message);
             return;
         }
+
+        const digitsOnly = payData.card_number.replace(/\D/g, '');
+        const cardNetwork = getEffectiveCardNetwork(payData.card_number, payData.card_network);
 
         try {
             await axios.post(
@@ -194,6 +169,7 @@ const Payments = () => {
                     transaction_id: payData.transaction_id || undefined,
                     notes: selectedPayment.notes || 'Online card deposit payment',
                     card_details: {
+                        card_network: cardNetwork,
                         card_number: digitsOnly,
                         card_holder: payData.card_holder.trim(),
                         expiry_date: payData.expiry_date,
@@ -517,33 +493,93 @@ const Payments = () => {
             </Container>
 
             {/* Pay Deposit Modal */}
-            <Modal isOpen={payModalOpen} toggle={() => setPayModalOpen(false)}>
-                <ModalHeader toggle={() => setPayModalOpen(false)}>
-                    Pay Security Deposit
+            <Modal
+                isOpen={payModalOpen}
+                toggle={() => setPayModalOpen(false)}
+                centered
+                size="lg"
+                contentClassName="border-0 shadow-lg rounded-4 overflow-hidden"
+            >
+                <ModalHeader
+                    toggle={() => setPayModalOpen(false)}
+                    close={
+                        <button
+                            type="button"
+                            className="btn-close btn-close-white"
+                            onClick={() => setPayModalOpen(false)}
+                            aria-label="Close"
+                        />
+                    }
+                    className="border-0 text-white"
+                    style={{
+                        background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
+                        padding: '1.25rem 1.5rem'
+                    }}
+                >
+                    <span className="d-flex align-items-center gap-2 fw-semibold">
+                        <FaCreditCard /> Pay Security Deposit
+                    </span>
                 </ModalHeader>
-                <ModalBody>
+                <ModalBody className="px-4 py-4" style={{ background: 'var(--card-bg)' }}>
                     {selectedPayment && (
                         <>
-                            <Alert color="info">
-                                <strong>Amount:</strong> {selectedPayment.amount?.toFixed(2) || '0.00'} OMR
-                                <br />
-                                <strong>For:</strong> {selectedPayment.notes || 'Security deposit'}
-                                <br />
-                                <strong>Method:</strong>{' '}
-                                {getPaymentMethodBadge(selectedPayment.payment_method || '—')}
-                            </Alert>
+                            <div
+                                className="rounded-4 p-3 mb-4 border"
+                                style={{
+                                    borderColor: 'var(--border-color)',
+                                    background: 'linear-gradient(145deg, rgba(21, 101, 192, 0.08), rgba(13, 71, 161, 0.04))'
+                                }}
+                            >
+                                <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                                    <div>
+                                        <div className="small text-uppercase fw-bold" style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em' }}>
+                                            Amount due
+                                        </div>
+                                        <div className="fs-3 fw-bold" style={{ color: 'var(--text-primary)' }}>
+                                            {selectedPayment.amount?.toFixed(2) || '0.00'}{' '}
+                                            <span className="fs-6 fw-semibold">OMR</span>
+                                        </div>
+                                    </div>
+                                    <div>{getPaymentMethodBadge(selectedPayment.payment_method || '—')}</div>
+                                </div>
+                                <hr className="my-3 opacity-25" />
+                                <div className="small" style={{ color: 'var(--text-secondary)' }}>
+                                    <strong style={{ color: 'var(--text-primary)' }}>For:</strong>{' '}
+                                    {selectedPayment.notes || 'Security deposit'}
+                                </div>
+                            </div>
+
+                            <FormGroup className="mb-4">
+                                <Label className="small text-uppercase fw-bold mb-2" style={{ color: 'var(--text-secondary)', letterSpacing: '0.05em' }}>
+                                    Transaction reference
+                                </Label>
+                                <div
+                                    className="rounded-3 px-3 py-2 border"
+                                    style={{
+                                        borderColor: 'var(--border-color)',
+                                        background: 'var(--bg-tertiary)',
+                                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                                        fontSize: '0.8rem',
+                                        wordBreak: 'break-all',
+                                        color: 'var(--text-primary)'
+                                    }}
+                                >
+                                    {payData.transaction_id}
+                                </div>
+                                <small className="d-block mt-2" style={{ color: 'var(--text-tertiary)' }}>
+                                    Auto-generated by the system for this payment.
+                                </small>
+                            </FormGroup>
+
                             {selectedPayment.payment_method === 'Cash' ? (
                                 <>
-                                    <Alert color="success" className="mb-3">
-                                        <strong>Cash Payment</strong>
-                                        <p className="mb-1 mt-2" style={{ fontSize: '0.95rem' }}>
-                                            Pay the security deposit in person at the hub. After staff records it, confirm here so your request can proceed.
-                                        </p>
-                                        <p className="mb-0" style={{ fontSize: '0.95rem' }}>
-                                            Pay the deposit in person at the hub, then confirm it here so your request can continue.
+                                    <Alert color="success" className="rounded-3 border-0 mb-4" style={{ background: 'rgba(76, 175, 80, 0.12)', color: 'var(--text-primary)' }}>
+                                        <strong>Cash payment</strong>
+                                        <p className="mb-0 mt-2 small" style={{ lineHeight: 1.5 }}>
+                                            Pay the security deposit in person at the hub, then confirm here so your request can proceed.
                                         </p>
                                         {(selectedPayment.resource_id?.location || selectedPayment.resource_id?.name) && (
-                                            <p className="mt-2 mb-0">
+                                            <p className="mt-3 mb-0 small">
                                                 <strong>Location:</strong>{' '}
                                                 {selectedPayment.resource_id?.location ||
                                                     selectedPayment.resource_id?.name ||
@@ -552,67 +588,119 @@ const Payments = () => {
                                         )}
                                     </Alert>
                                     <FormGroup>
-                                        <Label>Receipt / reference (optional)</Label>
-                                        <Input
-                                            type="text"
-                                            value={payData.transaction_id}
-                                            onChange={(e) => setPayData({ ...payData, transaction_id: e.target.value })}
-                                            placeholder="Receipt number or staff reference"
-                                        />
-                                    </FormGroup>
-                                    <FormGroup>
-                                        <Label>Notes (optional)</Label>
+                                        <Label>Notes for staff (optional)</Label>
                                         <Input
                                             type="text"
                                             value={payData.cash_notes}
                                             onChange={(e) => setPayData({ ...payData, cash_notes: e.target.value })}
-                                            placeholder="Any note for staff"
+                                            placeholder="e.g. receipt number from desk"
+                                            className="rounded-3"
+                                            style={{ borderColor: 'var(--border-color)' }}
                                         />
                                     </FormGroup>
                                 </>
                             ) : (
                                 <>
+                                    <FormGroup className="mb-4">
+                                        <Label className="fw-semibold mb-2">Card type *</Label>
+                                        <div
+                                            className="d-flex rounded-3 p-1 gap-1"
+                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}
+                                            role="group"
+                                            aria-label="Card type"
+                                        >
+                                            {['Visa', 'Mastercard'].map((network) => {
+                                                const active = payData.card_network === network;
+                                                const meta = CARD_NETWORK_META[network];
+                                                return (
+                                                    <button
+                                                        key={network}
+                                                        type="button"
+                                                        className="flex-fill border-0 py-2 px-2 rounded-2 fw-semibold transition-all"
+                                                        style={{
+                                                            background: active ? 'var(--card-bg)' : 'transparent',
+                                                            color: active ? meta.color : 'var(--text-secondary)',
+                                                            boxShadow: active ? '0 2px 10px rgba(0,0,0,0.08)' : 'none',
+                                                            transform: active ? 'scale(1.02)' : 'none'
+                                                        }}
+                                                        onClick={() => {
+                                                            const max = maxPanDigitsForNetwork(network);
+                                                            const raw = payData.card_number.replace(/\D/g, '');
+                                                            setPayData({
+                                                                ...payData,
+                                                                card_network: network,
+                                                                card_number: formatPanInput(raw, max)
+                                                            });
+                                                        }}
+                                                    >
+                                                        {network}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </FormGroup>
                                     <FormGroup>
-                                        <Label>Card Number *</Label>
+                                        <Label>Card number *</Label>
+                                        <small className="d-block mb-2" style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+                                            Card type updates from the number when possible. Visa: <strong>16</strong> digits starting with{' '}
+                                            <strong>4</strong>. Mastercard: <strong>16</strong> digits, prefix <strong>51–55</strong> or{' '}
+                                            <strong>2221–2720</strong>.
+                                        </small>
                                         <Input
                                             type="text"
-                                            maxLength="19"
+                                            inputMode="numeric"
+                                            autoComplete="cc-number"
+                                            maxLength={19}
+                                            className="rounded-3"
+                                            style={{ borderColor: 'var(--border-color)', letterSpacing: '0.08em' }}
                                             value={payData.card_number}
                                             onChange={(e) => {
-                                                const val = e.target.value.replace(/\s/g, '');
-                                                if (/^\d*$/.test(val) && val.length <= 16) {
-                                                    const parts = val.match(/\d{1,4}/g) || [];
-                                                    setPayData({ ...payData, card_number: parts.join(' ') });
-                                                }
+                                                const max = maxPanDigitsForNetwork(
+                                                    payData.card_network || 'Visa'
+                                                );
+                                                const raw = e.target.value.replace(/\D/g, '');
+                                                const inferred = inferCardNetworkFromPanDigits(raw);
+                                                setPayData({
+                                                    ...payData,
+                                                    card_number: formatPanInput(raw, max),
+                                                    ...(inferred ? { card_network: inferred } : {})
+                                                });
                                             }}
-                                            placeholder="1234 5678 9012 3456"
+                                            placeholder={
+                                                payData.card_network === 'Mastercard'
+                                                    ? '16 digits, e.g. 51xx … or 2221–2720 …'
+                                                    : '16 digits starting with 4'
+                                            }
                                         />
-                                        {cardType && (
-                                            <div
-                                                style={{
-                                                    marginTop: '0.5rem',
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.35rem',
-                                                    padding: '0.3rem 0.65rem',
-                                                    borderRadius: '999px',
-                                                    background: cardType.bg,
-                                                    color: cardType.color,
-                                                    fontSize: '0.8rem',
-                                                    fontWeight: '600'
-                                                }}
-                                            >
-                                                <FaCreditCard style={{ fontSize: '0.75rem' }} />
-                                                {cardType.label}
+                                        {selectedCardMeta && (
+                                            <div className="mt-2">
+                                                <span
+                                                    style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.35rem',
+                                                        padding: '0.35rem 0.75rem',
+                                                        borderRadius: '999px',
+                                                        background: selectedCardMeta.bg,
+                                                        color: selectedCardMeta.color,
+                                                        fontSize: '0.8rem',
+                                                        fontWeight: '600'
+                                                    }}
+                                                >
+                                                    <FaCreditCard style={{ fontSize: '0.75rem' }} />
+                                                    {selectedCardMeta.label}
+                                                </span>
                                             </div>
                                         )}
                                     </FormGroup>
-                                    <Row>
+                                    <Row className="g-3">
                                         <Col md={6}>
-                                            <FormGroup>
-                                                <Label>Card Holder *</Label>
+                                            <FormGroup className="mb-0">
+                                                <Label>Card holder *</Label>
                                                 <Input
                                                     type="text"
+                                                    className="rounded-3"
+                                                    style={{ borderColor: 'var(--border-color)' }}
                                                     value={payData.card_holder}
                                                     onChange={(e) => setPayData({ ...payData, card_holder: e.target.value })}
                                                     placeholder="Name on card"
@@ -620,16 +708,18 @@ const Payments = () => {
                                             </FormGroup>
                                         </Col>
                                         <Col md={3}>
-                                            <FormGroup>
+                                            <FormGroup className="mb-0">
                                                 <Label>Expiry (MM/YY) *</Label>
                                                 <Input
                                                     type="text"
                                                     maxLength="5"
+                                                    className="rounded-3"
+                                                    style={{ borderColor: 'var(--border-color)' }}
                                                     value={payData.expiry_date}
                                                     onChange={(e) => {
                                                         let v = e.target.value.replace(/\D/g, '');
                                                         if (v.length >= 2) {
-                                                            v = v.substring(0, 2) + '/' + v.substring(2, 4);
+                                                            v = `${v.substring(0, 2)}/${v.substring(2, 4)}`;
                                                         }
                                                         setPayData({ ...payData, expiry_date: v });
                                                     }}
@@ -638,43 +728,38 @@ const Payments = () => {
                                             </FormGroup>
                                         </Col>
                                         <Col md={3}>
-                                            <FormGroup>
+                                            <FormGroup className="mb-0">
                                                 <Label>CVV *</Label>
                                                 <Input
                                                     type="password"
-                                                    maxLength="4"
+                                                    maxLength="3"
+                                                    className="rounded-3"
+                                                    style={{ borderColor: 'var(--border-color)' }}
                                                     value={payData.cvv}
                                                     onChange={(e) => {
-                                                        const v = e.target.value.replace(/\D/g, '').substring(0, 4);
+                                                        const v = e.target.value.replace(/\D/g, '').substring(0, 3);
                                                         setPayData({ ...payData, cvv: v });
                                                     }}
-                                                    placeholder="123"
+                                                    placeholder="•••"
+                                                    inputMode="numeric"
                                                 />
                                             </FormGroup>
                                         </Col>
                                     </Row>
-                                    <FormGroup>
-                                        <Label>Transaction ID (optional)</Label>
-                                        <Input
-                                            type="text"
-                                            value={payData.transaction_id}
-                                            onChange={(e) => setPayData({ ...payData, transaction_id: e.target.value })}
-                                            placeholder="Reference from bank / gateway"
-                                        />
-                                    </FormGroup>
                                 </>
                             )}
                         </>
                     )}
                 </ModalBody>
-                <ModalFooter>
-                    <Button color="secondary" onClick={() => setPayModalOpen(false)}>
+                <ModalFooter
+                    className="border-0 pt-0 pb-4 px-4 d-flex justify-content-end gap-2"
+                    style={{ background: 'var(--card-bg)' }}
+                >
+                    <Button color="light" className="rounded-pill px-4 border" onClick={() => setPayModalOpen(false)}>
                         Cancel
                     </Button>
-                    <Button color="primary" onClick={handleConfirmPayDeposit}>
-                        {selectedPayment?.payment_method === 'Cash'
-                            ? 'Confirm Cash Payment'
-                            : 'Pay Now'}
+                    <Button color="primary" className="rounded-pill px-4 shadow-sm" onClick={handleConfirmPayDeposit}>
+                        {selectedPayment?.payment_method === 'Cash' ? 'Confirm cash payment' : 'Pay now'}
                     </Button>
                 </ModalFooter>
             </Modal>

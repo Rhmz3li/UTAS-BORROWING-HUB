@@ -39,7 +39,7 @@ const Home = () => {
     const [chatMessages, setChatMessages] = useState([
         {
             type: 'bot',
-            text: 'Hello! I am Abi. I can help only with using the UTAS Borrowing Hub system, such as resources, borrowing, reservations, payments, returns, notifications, and profile actions.'
+            text: 'Welcome to FAQ Support. I am Abi — your AI Chatbot for Assistance. Ask about borrowing rules, return deadlines, resource availability, reservations, payments, and returns. Use the shortcuts below for instant answers, or type your own question.'
         }
     ]);
 
@@ -169,6 +169,9 @@ const Home = () => {
     };
 
     const abiQuickQuestions = [
+        'What are the borrowing rules?',
+        'How do return deadlines work?',
+        'How do I check resource availability?',
         'How do I borrow a device?',
         'How do I reserve a device?',
         'How do card payments work?',
@@ -177,14 +180,23 @@ const Home = () => {
     ];
 
     const abiQuickReplies = {
-        'How do I borrow a device?': 'Open Resources, choose an available device, click Borrow, select the due date, then submit the request. If the device requires a deposit and you choose Card, complete the payment from Payments first, then wait for admin approval.',
-        'How do I reserve a device?': 'Open Resources, choose the device, click Reserve, select the pickup date and expiry date, then submit the reservation. If Card payment is required, complete the deposit in Payments before admin review.',
-        'How do card payments work?': 'When you choose Card, the system creates a payment record and opens the payment flow for you. After successful payment, the deposit becomes Paid and the admin is notified that your request is ready for review.',
-        'How can I return an item?': 'Go to My Borrows, find the active borrow, and request the return. After that, hub staff must confirm the physical return before the process is completed in the system.',
-        'Where do I see notifications?': 'Open Notifications from the user dashboard. You will find updates about approvals, rejections, payment completion, returns, refunds, and other system events there.'
+        'What are the borrowing rules?':
+            'Borrowing rules in this hub:\n\n• Start from Resources or a resource’s detail page, choose an available item, open Borrow, accept the terms, and set the borrow/due dates as the form shows.\n• If the resource has a department set, only users whose profile department matches that resource’s department can borrow or reserve it. Admin and Assistant roles bypass this rule.\n• If a refundable security deposit is required and you choose Card, complete the payment from Payments first; the request is then ready for staff/admin review. If no card deposit is required, the request still goes through admin approval as designed.\n• You will get updates in Notifications when your request is approved or rejected.',
+        'How do return deadlines work?':
+            'Return deadlines:\n\n• Each active borrow has a due date shown in My Borrows (and in your loan details).\n• Return the physical item on or before that due date to avoid overdue status.\n• To start a return: My Borrows → your active borrow → request return. Hub staff must confirm the physical return in the system before the borrow is fully completed.\n• If you are unsure of a specific date, open My Borrows and check the due date for that resource.',
+        'How do I check resource availability?':
+            'Resource availability:\n\n• Browse the catalog under Resources; use search and filters to find items.\n• On a resource’s detail page (/resources/:id), use the availability check for a specific borrow date before you confirm a borrow — the app checks whether the item can be borrowed for that period.\n• Availability also depends on stock (available quantity) and whether the item is already on loan for overlapping dates.\n• If a resource is restricted by department, your profile department must match to borrow or reserve.',
+        'How do I borrow a device?':
+            'To borrow: open Resources, pick an available device, click Borrow, accept the terms, set the due/borrow dates as prompted, and submit. If a card deposit is required, pay from Payments first, then wait for admin approval. Otherwise follow the same approval flow without a card step.',
+        'How do I reserve a device?':
+            'To reserve: open Resources or the resource detail page, click Reserve, choose pickup and expiry dates, accept the terms, and submit. If a card deposit is required, complete it in Payments before admin review.',
+        'How do card payments work?':
+            'When you choose Card for a deposit, the system creates a payment record and you complete card payment from the Payments page. After successful payment the status becomes Paid and the admin is notified that your borrow or reservation request is ready for review.',
+        'How can I return an item?':
+            'Go to My Borrows, find the active borrow, and request return. Physical return must be confirmed by hub staff in the system before the process is fully completed.',
+        'Where do I see notifications?':
+            'Open Notifications from the sidebar. You will see approvals, rejections, payment events, returns, refunds, and other system messages. Use Notification settings for preferences where available.'
     };
-
-    const abiSystemOnlyMessage = 'I can only help with the UTAS Borrowing Hub system. Please ask me about resources, borrowing, reservations, payments, returns, notifications, or your profile.';
 
     const handleSendChatMessage = async (presetMessage) => {
         const outgoingMessage = String(presetMessage || chatMessage).trim();
@@ -220,11 +232,14 @@ const Home = () => {
             setChatMessages((prev) => [...prev, { type: 'bot', text: reply }]);
         } catch (error) {
             console.error('Abi chat error:', error);
+            const errText =
+                error.response?.data?.message ||
+                'Sorry, Abi could not reply right now. Check that the server is running and OPENROUTER_API_KEY or OPENAI_API_KEY is set (or Ollama if USE_OLLAMA=true), then try again.';
             setChatMessages((prev) => [
                 ...prev,
                 {
                     type: 'bot',
-                    text: abiSystemOnlyMessage
+                    text: errText
                 }
             ]);
         } finally {
@@ -293,8 +308,8 @@ const Home = () => {
                         <Col md={4} className="text-center mb-3">
                             <div className="p-3 bg-info bg-opacity-10 rounded">
                                 <FaRobot size={30} className="text-info mb-2" />
-                                <h6>AI Chatbot Assistance</h6>
-                                <p className="small text-muted">Ask Abi for help with using this system only</p>
+                                <h6>AI Chatbot for Assistance</h6>
+                                <p className="small text-muted">FAQ Support — borrowing rules, return deadlines, resource availability, and how to use the hub</p>
                             </div>
                         </Col>
                     </Row>
@@ -1186,10 +1201,11 @@ const Home = () => {
                 <FaPlus /> Add Your Review
             </Button>
 
-            {/* AI Chatbot Floating Button */}
+            {/* AI Chatbot for Assistance — FAQ Support */}
             <Button
                 color="primary"
                 className="rounded-circle"
+                title="AI Chatbot for Assistance — FAQ Support (borrowing rules, returns, availability)"
                 style={{
                     position: 'fixed',
                     bottom: '30px',
@@ -1278,18 +1294,19 @@ const Home = () => {
             {/* Chatbot Modal */}
             <Modal isOpen={chatbotOpen} toggle={() => setChatbotOpen(false)} size="md">
                 <ModalHeader toggle={() => setChatbotOpen(false)}>
-                    <FaRobot className="me-2" />Abi - AI Chatbot Assistance
+                    <FaRobot className="me-2" />
+                    AI Chatbot for Assistance
                 </ModalHeader>
                 <ModalBody>
-                    <div className="text-center mb-4">
+                    <div className="text-center mb-3">
                         <FaRobot size={48} className="text-primary mb-3" />
-                        <h5>Hello! 👋</h5>
-                        <p className="text-muted">
-                            I am Abi. I can help only with the UTAS Borrowing Hub system, including FAQ support for resources, borrowing, reservations, payments, returns, notifications, and profile actions.
+                        <h5 className="mb-1">Abi — FAQ Support</h5>
+                        <p className="text-muted small mb-0 px-1">
+                            The chatbot answers frequently asked questions: borrowing rules, return deadlines, resource availability, reservations, payments, and returns — using the shortcuts below or your own message.
                         </p>
                     </div>
                     <div className="mb-3">
-                        <div className="small text-muted mb-2">FAQ Support</div>
+                        <div className="small fw-semibold text-secondary mb-2">FAQ Support</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                             {abiQuickQuestions.map((question) => (
                                 <Button
@@ -1334,13 +1351,13 @@ const Home = () => {
                         {chatLoading && (
                             <div className="d-flex align-items-center gap-2 text-muted small">
                                 <Spinner size="sm" />
-                                Abi is typing...
+                                Abi is answering…
                             </div>
                         )}
                     </div>
                     <InputGroup>
                         <Input
-                            placeholder="Ask Abi about using the system..."
+                            placeholder="Ask about borrowing rules, return deadlines, or availability…"
                             value={chatMessage}
                             onChange={(e) => setChatMessage(e.target.value)}
                             onKeyDown={(e) => {

@@ -1,9 +1,10 @@
-import { Container, Row, Col, Card, CardBody, Button, Input, InputGroup, InputGroupText, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Badge, Table, Alert } from 'reactstrap';
+import { Container, Row, Col, Card, CardBody, Button, Input, InputGroup, InputGroupText, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Badge, Table, Alert, Spinner } from 'reactstrap';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { FaPlus, FaSearch, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaBox, FaEye, FaTimes, FaLaptop, FaMobileAlt, FaFlask, FaBook, FaVideo, FaFolder, FaBuilding, FaGraduationCap, FaMicroscope, FaCogs, FaBriefcase, FaPalette } from 'react-icons/fa';
+import { FaPlus, FaSearch, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaBox, FaEye, FaTimes, FaLaptop, FaMobileAlt, FaFlask, FaBook, FaVideo, FaFolder, FaBuilding, FaGraduationCap, FaMicroscope, FaCogs, FaBriefcase, FaPalette, FaQrcode } from 'react-icons/fa';
 import { toast } from 'react-toastify';
+import { QRCodeSVG } from 'qrcode.react';
 
 
 const AdminResources = () => {
@@ -20,6 +21,8 @@ const AdminResources = () => {
   const [total, setTotal] = useState(0);
   const [collegeStats, setCollegeStats] = useState({});
   const [availableCategories, setAvailableCategories] = useState(['IT', 'Electronics', 'Lab Equipment', 'Books', 'Media', 'Other']);
+  const [generatingCodes, setGeneratingCodes] = useState(false);
+  const [identifiersLocked, setIdentifiersLocked] = useState(false);
   
   // Modal states
   const [modalOpen, setModalOpen] = useState(false);
@@ -51,35 +54,39 @@ const AdminResources = () => {
     fetchAvailableCategories();
   }, [currentPage, searchTerm, selectedCategory, selectedCollege, selectedStatus]);
 
-  // Open Add New Resource modal with pre-filled barcode when navigated from scanner
+  // Open Add New Resource when scan finds no device (barcode or QR — same value in both fields)
   useEffect(() => {
-    if (location.state?.openAddWithBarcode) {
-      const scannedBarcode = location.state.openAddWithBarcode;
-      // Clear the navigation state so it doesn't re-trigger on re-render
-      navigate(location.pathname, { replace: true, state: {} });
-      setSelectedResource(null);
-      setFormData({
-        name: '',
-        description: '',
-        category: 'IT',
-        college: 'General',
-        department: '',
-        status: 'Available',
-        location: '',
-        condition: 'Good',
-        max_borrow_days: 7,
-        total_quantity: 1,
-        available_quantity: 1,
-        barcode: scannedBarcode,
-        qr_code: '',
-        image: '',
-        requires_payment: false,
-        payment_amount: 0
-      });
-      setModalOpen(true);
-      toast.info(`Barcode "${scannedBarcode}" not found. Fill in the details to add it as a new resource.`);
-    }
-  }, [location.state]);
+    const scanned =
+      location.state?.openAddFromScan != null && location.state?.openAddFromScan !== ''
+        ? String(location.state.openAddFromScan).trim()
+        : location.state?.openAddWithBarcode != null && location.state?.openAddWithBarcode !== ''
+          ? String(location.state.openAddWithBarcode).trim()
+          : '';
+    if (!scanned) return;
+    navigate(location.pathname, { replace: true, state: {} });
+    setSelectedResource(null);
+    setIdentifiersLocked(false);
+    setFormData({
+      name: '',
+      description: '',
+      category: 'IT',
+      college: 'General',
+      department: '',
+      status: 'Available',
+      location: '',
+      condition: 'Good',
+      max_borrow_days: 7,
+      total_quantity: 1,
+      available_quantity: 1,
+      barcode: scanned,
+      qr_code: scanned,
+      image: '',
+      requires_payment: false,
+      payment_amount: 0
+    });
+    setModalOpen(true);
+    toast.info(`Code "${scanned}" not found. Barcode and QR are filled — complete the form and save.`);
+  }, [location.state, location.pathname, navigate]);
 
   const fetchAvailableCategories = async () => {
     try {
@@ -184,6 +191,7 @@ const AdminResources = () => {
 
   const handleAddNew = () => {
     setSelectedResource(null);
+    setIdentifiersLocked(false);
     setFormData({
       name: '',
       description: '',
@@ -204,7 +212,22 @@ const AdminResources = () => {
     setModalOpen(true);
   };
 
-  const handleEdit = (resource) => {
+  const handleEdit = async (resource) => {
+    let locked = ['Borrowed', 'Reserved'].includes(resource.status);
+    const token = localStorage.getItem('token');
+    const lookup = resource.qr_code || resource.barcode || resource._id;
+    if (token && lookup && !locked) {
+      try {
+        const res = await axios.get(
+          `http://localhost:5000/resources/scan/${encodeURIComponent(String(lookup))}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.data?.activeBorrow) locked = true;
+      } catch {
+        /* ignore scan errors; fields stay editable */
+      }
+    }
+    setIdentifiersLocked(locked);
     setSelectedResource(resource);
     setFormData({
       name: resource.name || '',
@@ -234,6 +257,48 @@ const AdminResources = () => {
     setViewModalOpen(true);
   };
 
+  const handleGenerateUniqueCodes = async () => {
+    if (generatingCodes) return;
+    if (identifiersLocked && selectedResource) {
+      toast.warning('Barcode and QR cannot be changed while this resource is borrowed or has a pending borrow.');
+      return;
+    }
+    if (selectedResource && (formData.barcode || formData.qr_code)) {
+      if (!window.confirm('Replace existing barcode and QR code with new unique values?')) return;
+    }
+    try {
+      setGeneratingCodes(true);
+      const token = localStorage.getItem('token');
+      const body = {};
+      if (selectedResource?._id) {
+        body.resource_id = selectedResource._id;
+        body.replace = !!(formData.barcode || formData.qr_code);
+      }
+      const res = await axios.post('http://localhost:5000/admin/resources/generate-codes', body, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const c = res.data?.codes;
+      if (c?.barcode) {
+        setFormData((fd) => ({ ...fd, barcode: c.barcode, qr_code: c.qr_code }));
+        if (res.data?.data && selectedResource?._id) {
+          setSelectedResource(res.data.data);
+        }
+        toast.success(
+          selectedResource?._id
+            ? 'Unique barcode and QR value saved on this resource.'
+            : 'Codes generated. Click Create to save the new resource with these codes.'
+        );
+        if (selectedResource?._id) {
+          fetchResources();
+        }
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to generate codes');
+    } finally {
+      setGeneratingCodes(false);
+    }
+  };
+
   const handleDelete = (resource) => {
     setSelectedResource(resource);
     setDeleteModalOpen(true);
@@ -260,6 +325,12 @@ const AdminResources = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const b = (formData.barcode || '').trim();
+    const q = (formData.qr_code || '').trim();
+    if ((b || q) && b !== q) {
+      toast.error('Barcode and QR code must match exactly (or leave both empty).');
+      return;
+    }
     try {
       const token = localStorage.getItem('token');
       
@@ -302,10 +373,7 @@ const AdminResources = () => {
       const token = localStorage.getItem('token');
       const newStatus = resource.status === 'Available' ? 'Maintenance' : 'Available';
       
-      await axios.put(`http://localhost:5000/resources/${resource._id}`, {
-        ...resource,
-        status: newStatus
-      }, {
+      await axios.put(`http://localhost:5000/resources/${resource._id}`, { status: newStatus }, {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -960,6 +1028,16 @@ const AdminResources = () => {
               </Col>
             </Row>
             <Row>
+              <Col md={12}>
+                {identifiersLocked && selectedResource && (
+                  <Alert color="secondary" className="py-2 small mb-2">
+                    Barcode and QR are locked: this resource is <strong>borrowed / reserved</strong> or has an{' '}
+                    <strong>active borrow</strong>. They unlock after the item is returned and borrows are cleared.
+                  </Alert>
+                )}
+              </Col>
+            </Row>
+            <Row>
               <Col md={6}>
                 <FormGroup>
                   <Label>
@@ -974,6 +1052,7 @@ const AdminResources = () => {
                     type="text"
                     value={formData.barcode}
                     onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                    disabled={identifiersLocked && !!selectedResource}
                     style={!selectedResource && formData.barcode ? { borderColor: '#1565c0', background: '#e8f0fe' } : {}}
                     placeholder="Scan or enter barcode"
                   />
@@ -986,8 +1065,33 @@ const AdminResources = () => {
                     type="text"
                     value={formData.qr_code}
                     onChange={(e) => setFormData({ ...formData, qr_code: e.target.value })}
+                    disabled={identifiersLocked && !!selectedResource}
                   />
                 </FormGroup>
+              </Col>
+            </Row>
+            <Row>
+              <Col md={12}>
+                <p className="small text-muted mb-2">Barcode and QR code must match exactly before you save.</p>
+              </Col>
+            </Row>
+            <Row>
+              <Col md={12}>
+                <Button
+                  type="button"
+                  color="info"
+                  outline
+                  className="d-flex align-items-center gap-2"
+                  onClick={handleGenerateUniqueCodes}
+                  disabled={generatingCodes || (identifiersLocked && !!selectedResource)}
+                  title="Assigns the same unique value to Barcode and QR for scanning and labels"
+                >
+                  {generatingCodes ? <Spinner size="sm" /> : <FaQrcode />}
+                  Generate unique codes (barcode + QR)
+                </Button>
+                <small className="text-muted d-block mt-1">
+                  Barcode and QR must always be the same value. This button creates one code (e.g. UBH-…) and saves it to both fields. For existing resources with codes, you will be asked to confirm replace.
+                </small>
               </Col>
             </Row>
           </ModalBody>
@@ -1023,6 +1127,17 @@ const AdminResources = () => {
                 <p><strong>Max Borrow Days:</strong> {selectedResource.max_borrow_days}</p>
                 <p><strong>Barcode:</strong> {selectedResource.barcode || 'N/A'}</p>
                 <p><strong>QR Code:</strong> {selectedResource.qr_code || 'N/A'}</p>
+                {(selectedResource.qr_code || selectedResource.barcode || selectedResource._id) && (
+                  <div className="mt-3 p-3 rounded" style={{ background: 'var(--bs-light, #f8f9fa)', display: 'inline-block' }}>
+                    <p className="small text-muted mb-2"><strong>Label preview</strong> (print or sticker)</p>
+                    <QRCodeSVG
+                      value={String(selectedResource.qr_code || selectedResource.barcode || selectedResource._id)}
+                      size={168}
+                      level="M"
+                      includeMargin
+                    />
+                  </div>
+                )}
                 <p>
                   <strong>Security Deposit:</strong>{' '}
                   {selectedResource.requires_payment && selectedResource.payment_amount > 0

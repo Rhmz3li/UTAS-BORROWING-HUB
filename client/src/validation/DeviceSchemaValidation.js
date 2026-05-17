@@ -8,7 +8,9 @@ export const resourceSchema = yup.object().shape({
   description: yup.string(),
   category: yup
     .string()
-    .oneOf(['IT', 'Electronics', 'Lab Equipment', 'Books', 'Media', 'Other'], 'Invalid category')
+    .trim()
+    .min(1, 'Category is required')
+    .max(120, 'Category is too long')
     .required('Category is required'),
   barcode: yup.string(),
   qr_code: yup.string(),

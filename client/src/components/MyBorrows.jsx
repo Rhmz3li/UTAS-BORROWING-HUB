@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Spinner, Alert } from "reactstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { fetchBorrowings, updateBorrowing } from "../redux/reducers/borrowingReducer";
+import { fetchBorrowings } from "../redux/reducers/borrowingReducer";
 import { FaBook, FaClock, FaCheckCircle, FaExclamationTriangle, FaArrowLeft, FaHourglassHalf, FaTimesCircle } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 
@@ -26,19 +26,6 @@ const MyBorrows = () => {
             toast.error('Failed to load borrows. Please try again.');
         }
     }, [isError]);
-
-    const handleReturn = async (borrowId) => {
-        try {
-            const result = await dispatch(updateBorrowing({
-                id: borrowId,
-                borrowingData: { condition_on_return: 'Good', status: 'Returned' }
-            })).unwrap();
-            toast.success(result?.message || 'Submitted successfully.');
-            dispatch(fetchBorrowings());
-        } catch (error) {
-            toast.error(typeof error === 'string' ? error : (error?.message || 'Failed to submit return'));
-        }
-    };
 
     return (
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
@@ -110,7 +97,6 @@ const MyBorrows = () => {
                                                 borrow.status === 'Overdue' ||
                                                 (borrow.status === 'Active' && isPastDue) ||
                                                 (borrow.status === 'PendingReturn' && isPastDue);
-                                            const canRequestReturn = ['Active', 'Overdue'].includes(borrow.status);
                                             const isReturnPendingStaff = borrow.status === 'PendingReturn';
                                             const daysUntilDue = borrow.due_date ? Math.ceil((new Date(borrow.due_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
                                             
@@ -152,7 +138,7 @@ const MyBorrows = () => {
                                                                 }) : 'N/A'}
                                                             </span>
                                                         </div>
-                                                        {daysUntilDue !== null && (canRequestReturn || isReturnPendingStaff) && (
+                                                        {daysUntilDue !== null && ['Active', 'Overdue', 'PendingReturn'].includes(borrow.status) && (
                                                             <div style={{ fontSize: '0.75rem', color: isOverdueRow ? '#f44336' : daysUntilDue <= 3 ? '#ff9800' : 'var(--text-secondary)', marginTop: '0.25rem' }}>
                                                                 {isOverdueRow
                                                                     ? `${Math.abs(daysUntilDue)} day(s) overdue`
@@ -273,20 +259,10 @@ const MyBorrows = () => {
                                                                 Waiting for admin approval
                                                             </span>
                                                         )}
-                                                        {canRequestReturn && (
-                                                            <Button 
-                                                                color="primary" 
-                                                                size="sm" 
-                                                                onClick={() => handleReturn(borrow._id)}
-                                                                style={{
-                                                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                                                    border: 'none',
-                                                                    borderRadius: '8px',
-                                                                    fontWeight: '600'
-                                                                }}
-                                                            >
-                                                                Request return{isOverdueRow ? ' (late)' : ''}
-                                                            </Button>
+                                                        {['Active', 'Overdue'].includes(borrow.status) && (
+                                                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontStyle: 'italic', display: 'block', maxWidth: '260px' }}>
+                                                                Return the physical item at the borrowing hub; only staff can confirm your return in the system.
+                                                            </span>
                                                         )}
                                                         {isReturnPendingStaff && (
                                                             <span style={{ fontSize: '0.85rem', color: '#1565c0', fontStyle: 'italic' }}>

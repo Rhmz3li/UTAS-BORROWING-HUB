@@ -28,12 +28,43 @@ import ResourceScanner from './ResourceScanner.jsx';
 import ScanAndUpdateStatus from './ScanAndUpdateStatus.jsx';
 import ScanResourceManagement from './ScanResourceManagement.jsx';
 
+/** Unread in-app notifications → admin sidebar section (by related_type). */
+const ADMIN_SECTION_ALERT_TYPES = {
+  '/admin/borrows': ['Borrow'],
+  '/admin/reservations': ['Reservation'],
+  '/admin/penalties': ['Penalty'],
+  '/admin/payments': ['Payment']
+};
+
+const ADMIN_SECTION_ACK_KEY = 'ubh_admin_section_ack_v1';
+
+function readAdminSectionAck() {
+  if (typeof sessionStorage === 'undefined') return {};
+  try {
+    const raw = sessionStorage.getItem(ADMIN_SECTION_ACK_KEY);
+    const o = raw ? JSON.parse(raw) : {};
+    return typeof o === 'object' && o !== null ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAdminSectionAck(map) {
+  if (typeof sessionStorage === 'undefined') return;
+  sessionStorage.setItem(ADMIN_SECTION_ACK_KEY, JSON.stringify(map));
+}
+
+function getNotificationTimestamp(n) {
+  const d = n.created_at || n.createdAt || n.updated_at || n.updatedAt;
+  return d ? new Date(d).getTime() : 0;
+}
+
 const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
-  const { unreadCount } = useSelector((state) => state.notifications || {});
+  const { unreadCount, notifications = [] } = useSelector((state) => state.notifications || {});
   const { theme, toggleTheme, isDark } = useTheme();
   const [scanMgmtModalOpen, setScanMgmtModalOpen] = React.useState(false);
   const [scanModalOpen, setScanModalOpen] = React.useState(false);
@@ -52,11 +83,49 @@ const Sidebar = () => {
     }
   }, [dispatch, user]);
 
+  // While admin is viewing a management page, treat matching unread items as "seen" for sidebar alert
+  React.useEffect(() => {
+    if (!isAdmin) return;
+    const p = location.pathname;
+    const m = { ...readAdminSectionAck() };
+    let changed = false;
+    Object.keys(ADMIN_SECTION_ALERT_TYPES).forEach((adminPath) => {
+      if (p !== adminPath && !p.startsWith(`${adminPath}/`)) return;
+      const types = ADMIN_SECTION_ALERT_TYPES[adminPath];
+      const unreadTimes = notifications
+        .filter((n) => !n.is_read && types.includes(n.related_type))
+        .map(getNotificationTimestamp);
+      const nextAck = Math.max(m[adminPath] || 0, ...unreadTimes, Date.now());
+      if (nextAck !== (m[adminPath] || 0)) {
+        m[adminPath] = nextAck;
+        changed = true;
+      }
+    });
+    if (changed) writeAdminSectionAck(m);
+  }, [isAdmin, location.pathname, notifications]);
+
+  React.useEffect(() => {
+    if (!user && typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(ADMIN_SECTION_ACK_KEY);
+    }
+  }, [user]);
+
   const isActive = (path) => {
     if (path === '/admin/dashboard' || path === '/admin') {
       return location.pathname === '/admin/dashboard' || location.pathname === '/admin';
     }
     return location.pathname === path || location.pathname.startsWith(path + '/');
+  };
+
+  const itemNeedsAdminPulse = (item) => {
+    if (!isAdmin || item.action === 'scanMgmt') return false;
+    const types = ADMIN_SECTION_ALERT_TYPES[item.path];
+    if (!types?.length) return false;
+    if (isActive(item.path)) return false;
+    const ack = readAdminSectionAck()[item.path] || 0;
+    return notifications.some(
+      (n) => !n.is_read && types.includes(n.related_type) && getNotificationTimestamp(n) > ack
+    );
   };
 
   const getRoleDisplayName = (role) => {
@@ -160,6 +229,29 @@ const Sidebar = () => {
 
   return (
     <>
+    <style>{`
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.1); opacity: 0.8; }
+      }
+      @keyframes pulse-badge {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2), 0 0 0 0 rgba(244, 67, 54, 0.7);
+        }
+        50% {
+          transform: scale(1.1);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2), 0 0 0 6px rgba(244, 67, 54, 0);
+        }
+      }
+      @keyframes ubhSidebarShake {
+        0%, 100% { transform: translateX(0); }
+        20% { transform: translateX(-3px); }
+        40% { transform: translateX(3px); }
+        60% { transform: translateX(-2px); }
+        80% { transform: translateX(2px); }
+      }
+    `}</style>
     <div style={{
       width: '280px',
       minHeight: '100vh',
@@ -288,7 +380,8 @@ const Sidebar = () => {
                 const active = (item.action === 'scanMgmt') ? false : isActive(item.path);
                 const isNotificationItem = item.path === '/notifications';
                 const hasUnread = isNotificationItem && unreadCount > 0;
-                
+                const adminPulse = itemNeedsAdminPulse(item);
+
                 return (
                   <div
                     key={item.path}
@@ -304,13 +397,17 @@ const Sidebar = () => {
                       padding: '0.875rem 1rem',
                       borderRadius: '8px',
                       cursor: 'pointer',
-                      background: active 
-                        ? sidebarPalette.activeBg 
+                      background: active
+                        ? sidebarPalette.activeBg
+                        : adminPulse
+                        ? 'rgba(244, 67, 54, 0.16)'
                         : hasUnread
                         ? 'rgba(255, 152, 0, 0.15)'
                         : 'transparent',
-                      borderLeft: active 
-                        ? '4px solid #ffc107' 
+                      borderLeft: active
+                        ? '4px solid #ffc107'
+                        : adminPulse
+                        ? '4px solid #f44336'
                         : hasUnread
                         ? '4px solid #ff9800'
                         : '4px solid transparent',
@@ -318,21 +415,25 @@ const Sidebar = () => {
                       alignItems: 'center',
                       gap: '0.75rem',
                       transition: 'all 0.2s ease',
-                      color: sidebarPalette.text,
+                      color: adminPulse && !active ? '#ffcdd2' : sidebarPalette.text,
                       fontWeight: active ? '600' : '400',
                       position: 'relative'
                     }}
                     onMouseEnter={(e) => {
                       if (!active) {
-                        e.currentTarget.style.background = hasUnread 
-                          ? 'rgba(255, 152, 0, 0.2)' 
+                        e.currentTarget.style.background = adminPulse
+                          ? 'rgba(244, 67, 54, 0.24)'
+                          : hasUnread
+                          ? 'rgba(255, 152, 0, 0.2)'
                           : sidebarPalette.hoverBg;
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (!active) {
-                        e.currentTarget.style.background = hasUnread 
-                          ? 'rgba(255, 152, 0, 0.15)' 
+                        e.currentTarget.style.background = adminPulse
+                          ? 'rgba(244, 67, 54, 0.16)'
+                          : hasUnread
+                          ? 'rgba(255, 152, 0, 0.15)'
                           : 'transparent';
                       }
                     }}
@@ -340,12 +441,18 @@ const Sidebar = () => {
                     <div style={{ position: 'relative', flexShrink: 0 }}>
                       <Icon style={{
                         fontSize: '1.1rem',
-                        color: active 
-                          ? '#ffc107' 
+                        color: active
+                          ? '#ffc107'
+                          : adminPulse
+                          ? '#ff8a80'
                           : hasUnread
                           ? '#ff9800'
                           : sidebarPalette.icon,
-                        animation: hasUnread ? 'pulse 2s infinite' : 'none',
+                        animation: adminPulse
+                          ? 'ubhSidebarShake 0.55s ease-in-out infinite'
+                          : hasUnread
+                          ? 'pulse 2s infinite'
+                          : 'none',
                         transition: 'color 0.3s ease'
                       }} />
                       {hasUnread && (
@@ -379,30 +486,6 @@ const Sidebar = () => {
                     }}>
                       {item.label}
                     </span>
-                    {hasUnread && (
-                      <style>{`
-                        @keyframes pulse {
-                          0%, 100% {
-                            transform: scale(1);
-                            opacity: 1;
-                          }
-                          50% {
-                            transform: scale(1.1);
-                            opacity: 0.8;
-                          }
-                        }
-                        @keyframes pulse-badge {
-                          0%, 100% {
-                            transform: scale(1);
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2), 0 0 0 0 rgba(244, 67, 54, 0.7);
-                          }
-                          50% {
-                            transform: scale(1.1);
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2), 0 0 0 6px rgba(244, 67, 54, 0);
-                          }
-                        }
-                      `}</style>
-                    )}
                   </div>
                 );
               })}
@@ -536,7 +619,11 @@ const Sidebar = () => {
       onScanUpdateStatus={() => setScanUpdateModalOpen(true)}
       isAdmin={isAdmin}
     />
-    <ResourceScanner isOpen={scanModalOpen} toggle={() => setScanModalOpen(false)} />
+    <ResourceScanner
+      isOpen={scanModalOpen}
+      toggle={() => setScanModalOpen(false)}
+      canOpenAddDeviceWhenUnknown={isAdmin}
+    />
     <ScanAndUpdateStatus isOpen={scanUpdateModalOpen} toggle={() => setScanUpdateModalOpen(false)} />
     </>
   );

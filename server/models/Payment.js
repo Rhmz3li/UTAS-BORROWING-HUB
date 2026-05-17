@@ -18,6 +18,7 @@ const PaymentSchema = mongoose.Schema({
     card_last4: {type: String, required: false, trim: true, maxlength: 4},
     card_holder: {type: String, required: false, trim: true},
     card_expiry: {type: String, required: false, trim: true, maxlength: 5},
+    card_network: {type: String, required: false, trim: true, maxlength: 40},
     created_at: {type: Date, required: false, default: Date.now},
     updated_at: {type: Date, required: false, default: Date.now}
 }, {

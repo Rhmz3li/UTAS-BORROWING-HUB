@@ -1,4 +1,4 @@
-import { Container, Row, Col, Card, CardBody, CardTitle, Button, Input, InputGroup, InputGroupText, Table, Badge, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Alert } from 'reactstrap';
+import { Container, Row, Col, Card, CardBody, CardTitle, Button, Input, InputGroup, InputGroupText, Table, Badge, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Alert, Spinner } from 'reactstrap';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -9,6 +9,7 @@ import {
   FaExclamationTriangle, FaDollarSign, FaFilter, FaSearch, FaStar, FaReply, FaCheckCircle
 } from 'react-icons/fa';
 import { toast } from 'react-toastify';
+import * as XLSX from 'xlsx';
 
 
 const AdminReports = () => {
@@ -52,6 +53,7 @@ const AdminReports = () => {
     priority: 'Normal',
     target_audience: 'All'
   });
+  const [announcementSubmitting, setAnnouncementSubmitting] = useState(false);
 
   useEffect(() => {
     fetchAnalytics();
@@ -168,186 +170,317 @@ const AdminReports = () => {
       }
     } catch (error) {
       console.error('Announcements error:', error);
+      toast.error(error.response?.data?.message || 'Failed to load announcements');
     }
   };
 
-  // Generate report data for export (uses real data from state)
-  const generateReportData = () => {
-    return {
-      summary: {
-        totalUsers: analyticsData?.totalUsers || 0,
-        totalResources: analyticsData?.totalResources || 0,
-        activeBorrows: analyticsData?.totalBorrows || 0,
-        totalReturns: analyticsData?.totalReturns || 0,
-        overdueItems: analyticsData?.overdueItems || 0,
-        totalRevenue: analyticsData?.totalRevenue || 0
-      },
-      mostBorrowed: mostBorrowed,
-      departmentStats: departmentStats,
-      userTrends: userTrends,
-      feedbacks: feedbacks,
-      generatedAt: new Date().toISOString()
-    };
+  /** Export uses the same in-memory data as the Analytics tab (after Apply Filter). */
+  const escapeHtml = (s) =>
+    String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const fmtTableDate = (d) => {
+    if (!d) return 'N/A';
+    const t = new Date(d).getTime();
+    return Number.isNaN(t) ? 'N/A' : new Date(d).toLocaleDateString();
   };
 
-  // Export to CSV
-  const exportToCSV = () => {
-    const data = generateReportData();
-    let csv = 'Report Type,Value\n';
-    csv += `Total Users,${data.summary.totalUsers}\n`;
-    csv += `Total Resources,${data.summary.totalResources}\n`;
-    csv += `Active Borrows,${data.summary.activeBorrows}\n`;
-    csv += `Total Returns,${data.summary.totalReturns}\n`;
-    csv += `Overdue Items,${data.summary.overdueItems}\n`;
-    csv += `Total Revenue,${data.summary.totalRevenue} OMR\n\n`;
-    
-    csv += 'Most Borrowed Resources\n';
-    csv += 'Resource Name,Category,Borrow Count\n';
-    data.mostBorrowed.forEach(item => {
-      csv += `${item.name || 'N/A'},${item.category || 'N/A'},${item.count || 0}\n`;
+  const paymentLabel = (b) => b.payment_status || 'Not Required';
+
+  const describeFiltersSummary = () => {
+    const parts = [];
+    if (dateRange.start || dateRange.end) {
+      parts.push(`Dates: ${dateRange.start || '…'} → ${dateRange.end || '…'}`);
+    }
+    if (filters.search?.trim()) parts.push(`Search: ${filters.search.trim()}`);
+    if (filters.category) parts.push(`Category: ${filters.category}`);
+    if (filters.resourceStatus) parts.push(`Resource status: ${filters.resourceStatus}`);
+    if (filters.department) parts.push(`Department: ${filters.department}`);
+    if (filters.userRole) parts.push(`User role: ${filters.userRole}`);
+    if (filters.borrowStatus) parts.push(`Borrow status: ${filters.borrowStatus}`);
+    if (filters.paymentStatus) parts.push(`Payment: ${filters.paymentStatus}`);
+    return parts.length ? parts.join(' | ') : 'No extra filters (all borrows in scope)';
+  };
+
+  const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  const buildReportCsvFromState = () => {
+    const a = analyticsData || {};
+    const rev = typeof a.totalRevenue === 'number' ? a.totalRevenue.toFixed(2) : String(a.totalRevenue ?? '0');
+
+    let csv = '\uFEFF';
+    csv += 'UTAS Borrowing Hub — Reports & Analytics\n';
+    csv += `Active filters,${csvEscape(describeFiltersSummary())}\n`;
+    csv += `Generated,${csvEscape(new Date().toLocaleString())}\n\n`;
+
+    csv += 'SUMMARY (same as dashboard cards)\n';
+    csv += 'Metric,Value\n';
+    csv += `Total Borrows,${a.totalBorrows ?? 0}\n`;
+    csv += `Total Returns,${a.totalReturns ?? 0}\n`;
+    csv += `Overdue Items,${a.overdueItems ?? 0}\n`;
+    csv += `Total Revenue (OMR),${rev}\n\n`;
+
+    csv += 'MOST BORROWED RESOURCES (current table)\n';
+    csv += 'Resource,Category,Borrows\n';
+    (mostBorrowed || []).forEach((item) => {
+      csv += [csvEscape(item.name || 'N/A'), csvEscape(item.category || 'N/A'), item.count ?? 0].join(',');
+      csv += '\n';
     });
-    
-    csv += '\nDepartment Statistics\n';
+    csv += '\n';
+
+    csv += 'ACTIVE DEPARTMENTS (current table)\n';
     csv += 'Department,Users,Borrows\n';
-    data.departmentStats.forEach(dept => {
-      csv += `${dept.department || 'N/A'},${dept.users || 0},${dept.borrows || 0}\n`;
+    (departmentStats || []).forEach((dept) => {
+      csv += [csvEscape(dept.department || 'N/A'), dept.users ?? 0, dept.borrows ?? 0].join(',');
+      csv += '\n';
+    });
+    csv += '\n';
+
+    csv += 'BORROW DETAILS FILTERED (same rows as on screen, up to 200)\n';
+    csv += '#,User,Role,Department,Resource,Category,Borrow Status,Payment Status,Borrow Date,Due Date,Return Date\n';
+    (borrowDetails || []).forEach((b, idx) => {
+      const ret = b.return_date ? fmtTableDate(b.return_date) : '-';
+      csv += [
+        String(idx + 1),
+        csvEscape(b.user_id?.full_name || 'N/A'),
+        csvEscape(b.user_id?.role || 'N/A'),
+        csvEscape(b.user_id?.department || 'N/A'),
+        csvEscape(b.resource_id?.name || 'N/A'),
+        csvEscape(b.resource_id?.category || 'N/A'),
+        csvEscape(b.status || 'N/A'),
+        csvEscape(paymentLabel(b)),
+        csvEscape(fmtTableDate(b.borrow_date)),
+        csvEscape(fmtTableDate(b.due_date)),
+        csvEscape(ret)
+      ].join(',');
+      csv += '\n';
     });
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `report_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Report exported as CSV successfully');
+    return csv;
   };
 
-  // Export to Excel (using CSV format with .xlsx extension)
-  const exportToExcel = () => {
-    const data = generateReportData();
-    // Create HTML table for Excel
-    let html = '<table>';
-    html += '<tr><th>Report Type</th><th>Value</th></tr>';
-    html += `<tr><td>Total Users</td><td>${data.summary.totalUsers}</td></tr>`;
-    html += `<tr><td>Total Resources</td><td>${data.summary.totalResources}</td></tr>`;
-    html += `<tr><td>Active Borrows</td><td>${data.summary.activeBorrows}</td></tr>`;
-    html += `<tr><td>Total Returns</td><td>${data.summary.totalReturns}</td></tr>`;
-    html += `<tr><td>Overdue Items</td><td>${data.summary.overdueItems}</td></tr>`;
-    html += `<tr><td>Total Revenue</td><td>${data.summary.totalRevenue} OMR</td></tr>`;
-    html += '</table>';
+  const buildReportWorkbookFromState = () => {
+    const a = analyticsData || {};
+    const summaryRows = [
+      { Metric: 'Report', Value: 'UTAS Borrowing Hub — Analytics (current filters)' },
+      { Metric: 'Filters', Value: describeFiltersSummary() },
+      { Metric: 'Generated', Value: new Date().toLocaleString() },
+      { Metric: 'Total Borrows', Value: a.totalBorrows ?? 0 },
+      { Metric: 'Total Returns', Value: a.totalReturns ?? 0 },
+      { Metric: 'Overdue Items', Value: a.overdueItems ?? 0 },
+      { Metric: 'Total Revenue (OMR)', Value: Number(a.totalRevenue ?? 0).toFixed(2) }
+    ];
 
-    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `report_${new Date().toISOString().split('T')[0]}.xls`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Report exported as Excel successfully');
+    const mostRows = (mostBorrowed || []).map((item) => ({
+      Resource: item.name || 'N/A',
+      Category: item.category || 'N/A',
+      Borrows: item.count ?? 0
+    }));
+
+    const deptRows = (departmentStats || []).map((d) => ({
+      Department: d.department || 'N/A',
+      Users: d.users ?? 0,
+      Borrows: d.borrows ?? 0
+    }));
+
+    const borrowRows = (borrowDetails || []).map((b, idx) => ({
+      '#': idx + 1,
+      User: b.user_id?.full_name || 'N/A',
+      Role: b.user_id?.role || 'N/A',
+      Department: b.user_id?.department || 'N/A',
+      Resource: b.resource_id?.name || 'N/A',
+      Category: b.resource_id?.category || 'N/A',
+      BorrowStatus: b.status || 'N/A',
+      PaymentStatus: paymentLabel(b),
+      BorrowDate: fmtTableDate(b.borrow_date),
+      DueDate: fmtTableDate(b.due_date),
+      ReturnDate: b.return_date ? fmtTableDate(b.return_date) : '-'
+    }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(
+        mostRows.length ? mostRows : [{ Resource: 'No data', Category: '', Borrows: 0 }]
+      ),
+      'MostBorrowed'
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(
+        deptRows.length ? deptRows : [{ Department: 'No data', Users: 0, Borrows: 0 }]
+      ),
+      'Departments'
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(
+        borrowRows.length
+          ? borrowRows
+          : [{ '#': '', User: '', Resource: '', Category: 'No rows for current filters' }]
+      ),
+      'BorrowDetails'
+    );
+    return wb;
   };
 
-  // Export to PDF
-  const exportToPDF = () => {
-    const data = generateReportData();
+  const openReportPdfFromState = () => {
+    const a = analyticsData || {};
+    const rev = Number(a.totalRevenue ?? 0).toFixed(2);
+
+    const borrowRowsHtml = (borrowDetails || [])
+      .map(
+        (b, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${escapeHtml(b.user_id?.full_name || 'N/A')}</td>
+            <td>${escapeHtml(b.user_id?.role || 'N/A')}</td>
+            <td>${escapeHtml(b.user_id?.department || 'N/A')}</td>
+            <td>${escapeHtml(b.resource_id?.name || 'N/A')}</td>
+            <td>${escapeHtml(b.resource_id?.category || 'N/A')}</td>
+            <td>${escapeHtml(b.status || 'N/A')}</td>
+            <td>${escapeHtml(paymentLabel(b))}</td>
+            <td>${escapeHtml(fmtTableDate(b.borrow_date))}</td>
+            <td>${escapeHtml(fmtTableDate(b.due_date))}</td>
+            <td>${escapeHtml(b.return_date ? fmtTableDate(b.return_date) : '-')}</td>
+          </tr>`
+      )
+      .join('');
+
+    const mostHtml = (mostBorrowed || [])
+      .map(
+        (item) =>
+          `<tr><td>${escapeHtml(item.name || 'N/A')}</td><td>${escapeHtml(item.category || 'N/A')}</td><td>${item.count ?? 0}</td></tr>`
+      )
+      .join('');
+
+    const deptHtml = (departmentStats || [])
+      .map(
+        (dept) =>
+          `<tr><td>${escapeHtml(dept.department || 'N/A')}</td><td>${dept.users ?? 0}</td><td>${dept.borrows ?? 0}</td></tr>`
+      )
+      .join('');
+
     const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Allow pop-ups for this site to print or save as PDF.');
+      return;
+    }
+
     printWindow.document.write(`
       <html>
         <head>
-          <title>UTAS Borrowing Hub - Report</title>
+          <title>UTAS Borrowing Hub — Report</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { color: #1976d2; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #1976d2; color: white; }
-            .summary { background-color: #f5f5f5; padding: 15px; margin: 20px 0; }
+            body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+            h1 { color: #1976d2; font-size: 20px; }
+            h2 { color: #333; font-size: 15px; margin-top: 22px; }
+            table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+            th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+            th { background: #1976d2; color: #fff; }
+            .meta { color: #555; margin: 8px 0 16px; }
+            .summary { background: #f5f5f5; padding: 12px 16px; margin: 12px 0; border-radius: 6px; }
           </style>
         </head>
         <body>
-          <h1>UTAS Borrowing Hub - System Report</h1>
-          <p>Generated on: ${new Date().toLocaleString()}</p>
-          
+          <h1>UTAS Borrowing Hub — Reports & Analytics</h1>
+          <p class="meta">Generated: ${escapeHtml(new Date().toLocaleString())}</p>
+          <p class="meta"><strong>Active filters:</strong> ${escapeHtml(describeFiltersSummary())}</p>
+
           <div class="summary">
-            <h2>Summary</h2>
-            <p>Total Users: ${data.summary.totalUsers}</p>
-            <p>Total Resources: ${data.summary.totalResources}</p>
-            <p>Active Borrows: ${data.summary.activeBorrows}</p>
-            <p>Total Returns: ${data.summary.totalReturns}</p>
-            <p>Overdue Items: ${data.summary.overdueItems}</p>
-            <p>Total Revenue: ${data.summary.totalRevenue} OMR</p>
+            <h2 style="margin-top:0">Summary</h2>
+            <p><strong>Total Borrows:</strong> ${a.totalBorrows ?? 0}</p>
+            <p><strong>Total Returns:</strong> ${a.totalReturns ?? 0}</p>
+            <p><strong>Overdue Items:</strong> ${a.overdueItems ?? 0}</p>
+            <p><strong>Total Revenue:</strong> ${rev} OMR</p>
           </div>
 
           <h2>Most Borrowed Resources</h2>
           <table>
-            <tr><th>Resource Name</th><th>Category</th><th>Borrow Count</th></tr>
-            ${data.mostBorrowed.map(item => 
-              `<tr><td>${item.name || 'N/A'}</td><td>${item.category || 'N/A'}</td><td>${item.count || 0}</td></tr>`
-            ).join('')}
+            <thead><tr><th>Resource</th><th>Category</th><th>Borrows</th></tr></thead>
+            <tbody>${mostHtml || '<tr><td colspan="3">No data</td></tr>'}</tbody>
           </table>
 
-          <h2>Department Statistics</h2>
+          <h2>Active Departments</h2>
           <table>
-            <tr><th>Department</th><th>Users</th><th>Borrows</th></tr>
-            ${data.departmentStats.map(dept => 
-              `<tr><td>${dept.department || 'N/A'}</td><td>${dept.users || 0}</td><td>${dept.borrows || 0}</td></tr>`
-            ).join('')}
+            <thead><tr><th>Department</th><th>Users</th><th>Borrows</th></tr></thead>
+            <tbody>${deptHtml || '<tr><td colspan="3">No data</td></tr>'}</tbody>
+          </table>
+
+          <h2>Borrow Details (Filtered)</h2>
+          <p class="meta">Same rows as the dashboard table (up to 200).</p>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>User</th><th>Role</th><th>Department</th><th>Resource</th><th>Category</th>
+                <th>Borrow Status</th><th>Payment Status</th><th>Borrow Date</th><th>Due Date</th><th>Return Date</th>
+              </tr>
+            </thead>
+            <tbody>${borrowRowsHtml || '<tr><td colspan="11">No records for the selected filters.</td></tr>'}</tbody>
           </table>
         </body>
       </html>
     `);
     printWindow.document.close();
+    printWindow.focus();
     printWindow.print();
-    toast.success('Report opened for PDF printing');
+  };
+
+  const triggerDownload = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   };
 
   const handleExport = async (format) => {
+    if (loading) {
+      toast.warning('Wait until the report has finished loading.');
+      return;
+    }
+    if (!analyticsData) {
+      toast.error('No report data yet. Open the Analytics tab and apply filters, then try again.');
+      return;
+    }
+
     try {
-      const token = localStorage.getItem('token');
-      const params = {
-        format,
-        ...(dateRange.start && { startDate: dateRange.start }),
-        ...(dateRange.end && { endDate: dateRange.end }),
-        ...(filters.search && { search: filters.search.trim() }),
-        ...(filters.category && { category: filters.category }),
-        ...(filters.resourceStatus && { resourceStatus: filters.resourceStatus }),
-        ...(filters.department && { department: filters.department }),
-        ...(filters.userRole && { userRole: filters.userRole }),
-        ...(filters.borrowStatus && { borrowStatus: filters.borrowStatus }),
-        ...(filters.paymentStatus && { paymentStatus: filters.paymentStatus })
-      };
+      const stamp = new Date().toISOString().split('T')[0];
 
-      const response = await axios.get(`${API_BASE}/admin/reports/export`, {
-        headers: { Authorization: `Bearer ${token}` },
-        params,
-        responseType: 'blob'
-      });
-
-      const blob = new Blob([response.data]);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `report_${new Date().toISOString().split('T')[0]}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      toast.success(`Report exported as ${format.toUpperCase()} successfully`);
-    } catch (error) {
-      console.error('Export error:', error);
-      // Fallback to client-side export
       if (format === 'csv') {
-        exportToCSV();
-      } else if (format === 'xlsx' || format === 'xls') {
-        exportToExcel();
-      } else if (format === 'pdf') {
-        exportToPDF();
+        triggerDownload(new Blob([buildReportCsvFromState()], { type: 'text/csv;charset=utf-8;' }), `report_${stamp}.csv`);
+        toast.success('CSV downloaded (matches current tables and filters)');
+        return;
       }
+
+      if (format === 'xlsx') {
+        const wb = buildReportWorkbookFromState();
+        const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        triggerDownload(
+          new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+          `report_${stamp}.xlsx`
+        );
+        toast.success('Excel downloaded (matches current tables and filters)');
+        return;
+      }
+
+      if (format === 'pdf') {
+        openReportPdfFromState();
+        toast.success('Print dialog opened — choose Save as PDF if you prefer a file');
+        return;
+      }
+
+      toast.error('Unknown export format');
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.error(err?.message || 'Export failed');
     }
   };
 
@@ -413,6 +546,13 @@ const AdminReports = () => {
       }
 
       const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('You must be logged in');
+        navigate('/login');
+        return;
+      }
+
+      setAnnouncementSubmitting(true);
       await axios.post(`${API_BASE}/admin/announcements`, announcementForm, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -421,7 +561,7 @@ const AdminReports = () => {
       toast.success('Announcement created successfully');
       setAnnouncementModal(false);
       setAnnouncementForm({ title: '', message: '', priority: 'Normal', target_audience: 'All' });
-      fetchAnnouncements();
+      await fetchAnnouncements();
       setTimeout(() => setFeedbackMessage({ type: '', text: '' }), 5000);
     } catch (error) {
       console.error('Announcement error:', error);
@@ -429,6 +569,8 @@ const AdminReports = () => {
       setFeedbackMessage({ type: 'danger', text: errorMsg });
       toast.error(errorMsg);
       setTimeout(() => setFeedbackMessage({ type: '', text: '' }), 5000);
+    } finally {
+      setAnnouncementSubmitting(false);
     }
   };
 
@@ -1269,18 +1411,21 @@ const AdminReports = () => {
                     onChange={(e) => setAnnouncementForm({ ...announcementForm, target_audience: e.target.value })}
                   >
                     <option value="All">All Users</option>
-                    <option value="Students">Students</option>
+                    <option value="Student">Students</option>
                     <option value="Staff">Staff</option>
-                    <option value="Admin">Admin</option>
+                    <option value="Assistant">Assistants</option>
+                    <option value="Admin">Admins</option>
                   </Input>
                 </FormGroup>
               </Col>
             </Row>
           </ModalBody>
           <ModalFooter>
-            <Button color="secondary" onClick={() => setAnnouncementModal(false)}>Cancel</Button>
-            <Button type="submit" style={{ background: '#4caf50', border: 'none' }}>
-              Create Announcement
+            <Button color="secondary" onClick={() => setAnnouncementModal(false)} disabled={announcementSubmitting}>
+              Cancel
+            </Button>
+            <Button type="submit" style={{ background: '#4caf50', border: 'none' }} disabled={announcementSubmitting}>
+              {announcementSubmitting ? <Spinner size="sm" /> : 'Create Announcement'}
             </Button>
           </ModalFooter>
         </Form>

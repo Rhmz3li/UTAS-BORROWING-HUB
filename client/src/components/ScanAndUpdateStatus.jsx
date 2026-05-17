@@ -1,15 +1,42 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Modal, ModalHeader, ModalBody, ModalFooter, Button, Alert, Spinner, Card, CardBody, FormGroup, Label, Input } from 'reactstrap';
 import { useNavigate } from 'react-router-dom';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 
 const SCANNER_DIV_ID = 'scan-update-status-scanner';
 const API_BASE = 'http://localhost:5000';
 
+const SCAN_FORMATS = [
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.CODE_39,
+  Html5QrcodeSupportedFormats.CODE_93,
+  Html5QrcodeSupportedFormats.CODABAR,
+  Html5QrcodeSupportedFormats.ITF,
+  Html5QrcodeSupportedFormats.DATA_MATRIX,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.UPC_A,
+  Html5QrcodeSupportedFormats.UPC_E,
+];
+
+function normalizeScanCode(raw) {
+  let s = String(raw ?? '')
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF]/g, '');
+  try {
+    s = s.normalize('NFC');
+  } catch (e) {
+    /* ignore */
+  }
+  return s;
+}
+
 const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
   const scannerRef = useRef(null);
+  const processingScanRef = useRef(false);
   const [step, setStep] = useState('scan');
   const [starting, setStarting] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -62,7 +89,11 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
         scannerRef.current = html5QrCode;
         await html5QrCode.start(
           cameraId,
-          { fps: 10, qrbox: { width: 250, height: 250 } },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            formatsToSupport: SCAN_FORMATS,
+          },
           (decodedText) => {
             if (mounted && scannerRef.current) onScanSuccess(decodedText);
           },
@@ -79,12 +110,15 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       }
     };
 
-    const onScanSuccess = async (code) => {
+    const onScanSuccess = async (rawCode) => {
+      const code = normalizeScanCode(rawCode);
+      if (!code || processingScanRef.current) return;
       const token = localStorage.getItem('token');
       if (!token) {
         toast.error('You must be logged in');
         return;
       }
+      processingScanRef.current = true;
       try {
         const res = await axios.get(`${API_BASE}/resources/scan/${encodeURIComponent(code)}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -96,20 +130,22 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
           setStep('result');
           setError(null);
         } else {
-          // Barcode not found – open Add New Resource with barcode pre-filled
           await stopScanner();
           toggle();
-          navigate('/admin/resources', { state: { openAddWithBarcode: code } });
+          navigate('/admin/resources', { state: { openAddFromScan: code } });
+          toast.info(`Code not found. Opening add device — same value for barcode and QR.`);
         }
       } catch (err) {
         if (err.response?.status === 404) {
-          // Barcode not found – open Add New Resource with barcode pre-filled
           await stopScanner();
           toggle();
-          navigate('/admin/resources', { state: { openAddWithBarcode: code } });
+          navigate('/admin/resources', { state: { openAddFromScan: code } });
+          toast.info(`Code not found. Opening add device — same value for barcode and QR.`);
         } else {
           toast.error(err.response?.data?.message || 'Scan failed. Please try again.');
         }
+      } finally {
+        processingScanRef.current = false;
       }
     };
 
@@ -119,6 +155,23 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       stopScanner();
     };
   }, [isOpen, step]);
+
+  const refreshScanSnapshot = async (resObj) => {
+    if (!resObj?._id) return;
+    const token = localStorage.getItem('token');
+    const lookup = resObj.qr_code || resObj.barcode || resObj._id;
+    try {
+      const res = await axios.get(`${API_BASE}/resources/scan/${encodeURIComponent(lookup)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.data?.success && res.data?.data) {
+        setResource(res.data.data);
+        setActiveBorrow(res.data.activeBorrow || null);
+      }
+    } catch {
+      /* keep last local state */
+    }
+  };
 
   const handleReturn = async () => {
     if (!activeBorrow || !resource) return;
@@ -134,6 +187,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       setReturnModal(false);
       setActiveBorrow(null);
       setResource((r) => r ? { ...r, status: 'Available' } : null);
+      await refreshScanSnapshot(resource);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to record return');
     } finally {
@@ -154,6 +208,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       toast.success('Resource marked as lost');
       setActiveBorrow(null);
       setResource((r) => r ? { ...r, status: 'Lost' } : null);
+      await refreshScanSnapshot(resource);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update lost status');
     } finally {
@@ -173,6 +228,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       );
       setResource((r) => r ? { ...r, status: newStatus } : null);
       toast.success(newStatus === 'Maintenance' ? 'Resource set to Maintenance' : 'Status updated to Available');
+      await refreshScanSnapshot(resource);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update status');
     } finally {
@@ -197,6 +253,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
           {step === 'scan' && (
             <>
               {error && <Alert color="danger">{error}</Alert>}
+              <p className="small text-muted mb-2">Scan a resource QR or barcode. Borrow and return actions update the system immediately.</p>
               {starting && (
                 <div className="text-center py-4">
                   <Spinner />

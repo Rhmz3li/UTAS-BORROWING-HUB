@@ -1,13 +1,31 @@
 import {createSlice, createAsyncThunk} from "@reduxjs/toolkit";
 import axios from 'axios';
+import { maybePlayNewNotificationSound, playNotificationSound, resetNotificationSoundSession } from '../../utils/playNotificationSound.js';
+import { logout } from './authReducer.js';
 
-export const fetchNotifications = createAsyncThunk("notifications/fetchNotifications", async () => {
+export const fetchNotifications = createAsyncThunk("notifications/fetchNotifications", async (_, { getState }) => {
     try {
         const token = localStorage.getItem('token');
+        const prevList = getState().notifications?.notifications || [];
+        const prevIds = new Set(prevList.map((n) => String(n._id)));
+
         const response = await axios.get("http://localhost:5000/notifications", {
             headers: { Authorization: `Bearer ${token}` }
         });
-        return response.data;
+
+        const payload = response.data;
+        const newList = payload?.data || payload?.notifications || [];
+        const newIds = new Set(newList.map((n) => String(n._id)));
+        let hasNewId = false;
+        for (const id of newIds) {
+            if (!prevIds.has(id)) {
+                hasNewId = true;
+                break;
+            }
+        }
+        maybePlayNewNotificationSound(token, hasNewId);
+
+        return payload;
     } catch (error) {
         throw error;
     }
@@ -31,6 +49,7 @@ export const addNotification = createAsyncThunk("notifications/addNotification",
         const response = await axios.post("http://localhost:5000/notifications", notificationData, {
             headers: { Authorization: `Bearer ${token}` }
         });
+        playNotificationSound();
         return response.data;
     } catch (error) {
         throw error;
@@ -76,7 +95,12 @@ export const NotificationSlice = createSlice({
     initialState: initVal,
     reducers: {},
     extraReducers: (builder) => {
-        builder.addCase(fetchNotifications.pending, (state, action) => {
+        builder
+        .addCase(logout, () => {
+            resetNotificationSoundSession();
+            return { ...initVal };
+        })
+        .addCase(fetchNotifications.pending, (state, action) => {
             state.isLoading = true
         })
         .addCase(fetchNotifications.fulfilled, (state, action) => {
