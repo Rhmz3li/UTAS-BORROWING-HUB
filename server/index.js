@@ -23,7 +23,9 @@ import PenaltyModel from './models/Penalty.js';
 import PaymentModel from './models/Payment.js';
 import FeedbackModel from './models/Feedback.js';
 import AnnouncementModel from './models/Announcement.js';
+import ChatModel from './models/Chat.js'
 import XLSX from 'xlsx';
+import { validateCardHolderName, validateCardNumberFull } from './utils/cardValidation.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Always load server/.env (not cwd), so Abi and DB keys work when started from repo root
@@ -49,6 +51,7 @@ const checkRateLimit = (email) => {
         return { allowed: true };
     }
     
+
     // Reset if window has passed
     if (now - attempts.lastAttempt > RESET_REQUEST_WINDOW) {
         resetRequestAttempts.set(normalizedEmail, { count: 1, lastAttempt: now });
@@ -290,6 +293,63 @@ const emailFooter = `
     © ${new Date().getFullYear()} UTAS Borrowing Hub. All rights reserved.
   </div>
 `;
+
+/** Refund completed deposit or cancel pending payment when a borrow request is rejected. */
+async function processBorrowDepositRefundOnReject(borrow, adminId) {
+    const refundInfo = { action: 'none', amount: 0 };
+    if (!borrow?.payment_id) return refundInfo;
+
+    const depositPayment = await PaymentModel.findById(borrow.payment_id);
+    if (!depositPayment || depositPayment.payment_type !== 'Resource') return refundInfo;
+
+    refundInfo.amount = depositPayment.amount || 0;
+    const resourceName = borrow.resource_id?.name || 'resource';
+    const userId = borrow.user_id?._id || borrow.user_id;
+
+    if (depositPayment.status === 'Completed') {
+        depositPayment.status = 'Refunded';
+        depositPayment.updated_at = Date.now();
+        if (adminId) depositPayment.processed_by = adminId;
+        const suffix = ' | Refunded automatically: borrow request rejected';
+        depositPayment.notes = depositPayment.notes ? `${depositPayment.notes}${suffix}` : suffix.trim();
+        await depositPayment.save();
+        refundInfo.action = 'refunded';
+        refundInfo.paymentId = depositPayment._id;
+
+        if (userId) {
+            await NotificationModel.create({
+                user_id: userId,
+                title: 'Security Deposit Refunded',
+                message: `Your security deposit of ${depositPayment.amount} OMR for "${resourceName}" has been refunded because your borrow request was rejected.`,
+                type: 'Success',
+                related_type: 'Payment',
+                related_id: depositPayment._id
+            });
+        }
+    } else if (depositPayment.status === 'Pending') {
+        depositPayment.status = 'Failed';
+        depositPayment.updated_at = Date.now();
+        if (adminId) depositPayment.processed_by = adminId;
+        const suffix = ' | Cancelled: borrow request rejected';
+        depositPayment.notes = depositPayment.notes ? `${depositPayment.notes}${suffix}` : suffix.trim();
+        await depositPayment.save();
+        refundInfo.action = 'cancelled_pending';
+        refundInfo.paymentId = depositPayment._id;
+
+        if (userId) {
+            await NotificationModel.create({
+                user_id: userId,
+                title: 'Payment Request Cancelled',
+                message: `Your pending security deposit of ${depositPayment.amount} OMR for "${resourceName}" was cancelled because your borrow request was rejected.`,
+                type: 'Info',
+                related_type: 'Payment',
+                related_id: depositPayment._id
+            });
+        }
+    }
+
+    return refundInfo;
+}
 
 // Forgot Password - Send reset link
 app.post("/forgot-password", async (req, res) => {
@@ -791,6 +851,143 @@ app.get("/resources", async (req, res) => {
     }
 });
 
+/** Resource recommendations from borrow history, department, college, and campus popularity. */
+async function buildResourceRecommendationsForUser(user) {
+    const resultLimit = 12;
+    const isStaffAdmin = ['Admin', 'Assistant'].includes(user.role);
+    const resourceQuery = {
+        status: 'Available',
+        available_quantity: { $gt: 0 }
+    };
+    if (user.department && !isStaffAdmin) {
+        resourceQuery.$or = [
+            { department: user.department },
+            { department: null },
+            { department: '' },
+            { department: { $exists: false } }
+        ];
+    }
+
+    const userBorrows = await BorrowModel.find({ user_id: user._id })
+        .populate('resource_id', 'name category department college')
+        .sort({ created_at: -1 })
+        .limit(120)
+        .lean();
+
+    const categoryCounts = {};
+    const borrowedResourceIds = new Set();
+    for (const borrow of userBorrows) {
+        const resource = borrow.resource_id;
+        if (!resource) continue;
+        if (resource._id) borrowedResourceIds.add(String(resource._id));
+        if (resource.category) {
+            categoryCounts[resource.category] = (categoryCounts[resource.category] || 0) + 1;
+        }
+    }
+    const topCategory =
+        Object.entries(categoryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+    const popularityAgg = await BorrowModel.aggregate([
+        { $group: { _id: '$resource_id', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 80 }
+    ]);
+    const popularityMap = new Map(
+        popularityAgg.map((row) => [String(row._id), row.count])
+    );
+
+    const candidates = await ResourceModel.find(resourceQuery).lean();
+    const scored = [];
+
+    for (const resource of candidates) {
+        const resourceId = String(resource._id);
+        let score = 0;
+        const reasons = [];
+
+        if (topCategory && resource.category === topCategory) {
+            score += 30;
+            reasons.push(`Based on your borrowing history (${topCategory})`);
+        }
+        if (borrowedResourceIds.has(resourceId)) {
+            score += 25;
+            reasons.push('You borrowed this item before');
+        }
+        if (user.department && resource.department === user.department) {
+            score += 20;
+            reasons.push('Matches your academic department');
+        }
+        if (user.college && resource.college === user.college) {
+            score += 12;
+            reasons.push(`Available in your college (${user.college})`);
+        }
+        const borrowCount = popularityMap.get(resourceId) || 0;
+        if (borrowCount >= 5) {
+            score += 15;
+            reasons.push('Frequently used across the hub');
+        } else if (borrowCount >= 2) {
+            score += 8;
+            reasons.push('Popular with other students');
+        }
+
+        if (score === 0) {
+            score = 1;
+            reasons.push('Available now in the catalog');
+        }
+
+        scored.push({
+            resource,
+            score,
+            reasons: [...new Set(reasons)].slice(0, 2)
+        });
+    }
+
+    scored.sort((a, b) => b.score - a.score || String(a.resource.name).localeCompare(String(b.resource.name)));
+
+    return {
+        data: scored.slice(0, resultLimit).map((item) => ({
+            ...item.resource,
+            recommendation_score: item.score,
+            recommendation_reasons: item.reasons
+        })),
+        meta: {
+            based_on: {
+                borrow_count: userBorrows.length,
+                top_category: topCategory,
+                department: user.department || null,
+                college: user.college || null
+            }
+        }
+    };
+}
+
+app.get('/resources/recommendations', async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
+        const result = await buildResourceRecommendationsForUser(user);
+        return res.json({
+            success: true,
+            data: result.data,
+            meta: result.meta
+        });
+    } catch (error) {
+        console.error('Resource recommendations error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to load recommendations'
+        });
+    }
+});
+
 // GET single resource by id (catalog detail page; rejects non-ObjectId ids so /resources/scan/... is unaffected)
 app.get("/resources/:id", async (req, res) => {
     try {
@@ -1108,19 +1305,12 @@ app.post("/resources", async (req, res) => {
             availableQuantity = totalQuantity;
         }
 
-        // Convert empty strings to null for barcode and qr_code to work with sparse unique index
-        // Sparse indexes only ignore null/undefined, not empty strings
-        // Multiple null values are allowed with sparse unique index
-        const barcode = req.body.barcode && req.body.barcode.trim() !== '' ? req.body.barcode.trim() : null;
-        const qr_code = req.body.qr_code && req.body.qr_code.trim() !== '' ? req.body.qr_code.trim() : null;
-
-        if ((barcode || qr_code) && barcode !== qr_code) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    'Barcode and QR code must be the same value. Leave both empty or use identical text in both fields, or use Generate unique codes.'
-            });
+        const identifierCheck = validateResourceIdentifierPair(req.body.barcode, req.body.qr_code);
+        if (identifierCheck.error) {
+            return res.status(400).json({ success: false, message: identifierCheck.error });
         }
+        const barcode = identifierCheck.barcode;
+        const qr_code = identifierCheck.qr_code;
 
         // Check for duplicate barcode only if a non-empty value is provided
         // null values are allowed multiple times with sparse unique index
@@ -1279,6 +1469,45 @@ app.post("/resources", async (req, res) => {
     }
 });
 
+const RESOURCE_IDENTIFIER_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
+
+/** Validate barcode + qr_code pair (optional both empty; if set must match format and each other). */
+function validateResourceIdentifierPair(barcodeRaw, qrRaw) {
+    const barcode = barcodeRaw && String(barcodeRaw).trim() !== '' ? String(barcodeRaw).trim() : '';
+    const qr_code = qrRaw && String(qrRaw).trim() !== '' ? String(qrRaw).trim() : '';
+
+    if (!barcode && !qr_code) {
+        return { barcode: null, qr_code: null, error: null };
+    }
+
+    const checkOne = (value, label) => {
+        if (/\s/.test(value)) return `${label} cannot contain spaces.`;
+        if (value.length < 3) return `${label} must be at least 3 characters.`;
+        if (value.length > 64) return `${label} must be 64 characters or less.`;
+        if (!RESOURCE_IDENTIFIER_RE.test(value)) {
+            return `${label} may only use letters, numbers, hyphens, and underscores (e.g. UBH-ABC123XY).`;
+        }
+        return null;
+    };
+
+    const barcodeErr = barcode ? checkOne(barcode, 'Barcode') : null;
+    const qrErr = qr_code ? checkOne(qr_code, 'QR code') : null;
+    if (barcodeErr) return { barcode: null, qr_code: null, error: barcodeErr };
+    if (qrErr) return { barcode: null, qr_code: null, error: qrErr };
+
+    if (barcode && !qr_code) {
+        return { barcode: null, qr_code: null, error: 'QR code is required and must match the barcode.' };
+    }
+    if (qr_code && !barcode) {
+        return { barcode: null, qr_code: null, error: 'Barcode is required and must match the QR code.' };
+    }
+    if (barcode !== qr_code) {
+        return { barcode: null, qr_code: null, error: 'Barcode and QR code must be the same value.' };
+    }
+
+    return { barcode, qr_code, error: null };
+}
+
 /** Unique label for barcode + QR (same value on both fields). */
 async function allocateUniqueResourceAssetCode() {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1415,32 +1644,21 @@ app.put("/resources/:id", async (req, res) => {
             }
         }
 
-        // Convert empty strings to null for barcode and qr_code to work with sparse unique index
-        // Sparse indexes only ignore null/undefined, not empty strings
-        let barcode = null;
-        let qr_code = null;
-        
-        if (req.body.barcode !== undefined) {
-            barcode = req.body.barcode && req.body.barcode.trim() !== '' ? req.body.barcode.trim() : null;
+        const mergedBarcodeRaw =
+            req.body.barcode !== undefined ? req.body.barcode : resource.barcode;
+        const mergedQrRaw = req.body.qr_code !== undefined ? req.body.qr_code : resource.qr_code;
+        const identifierCheck = validateResourceIdentifierPair(mergedBarcodeRaw, mergedQrRaw);
+        if (identifierCheck.error) {
+            return res.status(400).json({ success: false, message: identifierCheck.error });
         }
-        if (req.body.qr_code !== undefined) {
-            qr_code = req.body.qr_code && req.body.qr_code.trim() !== '' ? req.body.qr_code.trim() : null;
-        }
+
+        const barcode =
+            req.body.barcode !== undefined ? identifierCheck.barcode : (resource.barcode ?? null);
+        const qr_code =
+            req.body.qr_code !== undefined ? identifierCheck.qr_code : (resource.qr_code ?? null);
 
         const nextBarcode = req.body.barcode !== undefined ? barcode : resource.barcode;
         const nextQr = req.body.qr_code !== undefined ? qr_code : resource.qr_code;
-        if (req.body.barcode !== undefined || req.body.qr_code !== undefined) {
-            const effB =
-                nextBarcode == null || String(nextBarcode).trim() === '' ? null : String(nextBarcode).trim();
-            const effQ = nextQr == null || String(nextQr).trim() === '' ? null : String(nextQr).trim();
-            if ((effB || effQ) && effB !== effQ) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        'Barcode and QR code must be the same value. Leave both empty or use identical text in both fields, or use Generate unique codes.'
-                });
-            }
-        }
         const identifiersChange =
             (req.body.barcode !== undefined && nextBarcode !== resource.barcode) ||
             (req.body.qr_code !== undefined && nextQr !== resource.qr_code);
@@ -2074,7 +2292,7 @@ app.put("/borrow/:id/return", async (req, res) => {
                   <tr><td style="padding:6px;color:#555;">Type</td><td style="padding:6px;">${penaltyType}</td></tr>
                   <tr><td style="padding:6px;color:#555;">Amount</td><td style="padding:6px;font-weight:bold;">${fineAmount} OMR</td></tr>
                 </table>
-                <p>Please sign in to the hub and settle your penalty from the Penalties page.</p>
+                <p>Please sign in, choose Cash or Card on the Penalties page, then complete payment from <strong>My Payments</strong> (same steps as security deposits).</p>
               </div>${emailFooter}</div>`
                     });
                 }
@@ -3138,6 +3356,23 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
 
         const { reason } = req.body;
 
+        // Refund paid deposit or cancel pending payment before deleting the borrow record
+        const refundInfo = await processBorrowDepositRefundOnReject(borrow, admin._id);
+
+        const refundNote =
+            refundInfo.action === 'refunded'
+                ? ` Your security deposit of ${refundInfo.amount} OMR has been refunded automatically.`
+                : refundInfo.action === 'cancelled_pending'
+                    ? ' Your pending security deposit payment has been cancelled.'
+                    : '';
+
+        const refundEmailBlock =
+            refundInfo.action === 'refunded'
+                ? `<p style="color:#2e7d32;margin-top:16px;">Your security deposit of <strong>${refundInfo.amount} OMR</strong> has been refunded automatically.</p>`
+                : refundInfo.action === 'cancelled_pending'
+                    ? `<p style="margin-top:16px;">Your pending security deposit payment has been cancelled.</p>`
+                    : '';
+
         // Delete the borrow request
         await BorrowModel.findByIdAndDelete(req.params.id);
 
@@ -3147,7 +3382,7 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
             await NotificationModel.create({
                 user_id: rejectUserId,
                 title: 'Borrow Request Rejected',
-                message: `Your borrow request for ${borrow.resource_id.name} has been rejected. ${reason ? `Reason: ${reason}` : ''}`,
+                message: `Your borrow request for ${borrow.resource_id.name} has been rejected.${reason ? ` Reason: ${reason}` : ''}${refundNote}`,
                 type: 'Error',
                 related_type: 'Borrow',
                 related_id: null
@@ -3168,6 +3403,7 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
                       <tr><td style="padding:6px;color:#555;">Resource</td><td style="padding:6px;font-weight:bold;">${borrow.resource_id.name}</td></tr>
                       ${reason ? `<tr><td style="padding:6px;color:#555;">Reason</td><td style="padding:6px;">${reason}</td></tr>` : ''}
                     </table>
+                    ${refundEmailBlock}
                     <p>If you have questions, please contact the admin team.</p>
                   </div>${emailFooter}</div>`
             });
@@ -3175,7 +3411,8 @@ app.put("/admin/borrows/:id/reject", async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: 'Borrow request rejected successfully'
+            message: 'Borrow request rejected successfully',
+            refundInfo
         });
     } catch (error) {
         console.error('Reject borrow error:', error);
@@ -3304,6 +3541,71 @@ app.put("/notifications/:id/read", async (req, res) => {
 
 // ==================== PENALTIES ROUTES ====================
 
+async function attachLatestPaymentsToPenalties(penaltyDocs) {
+    if (!penaltyDocs?.length) return penaltyDocs;
+    const ids = penaltyDocs.map((p) => p._id);
+    const payments = await PaymentModel.find({ penalty_id: { $in: ids } })
+        .sort({ created_at: -1 })
+        .lean();
+    const map = {};
+    for (const pay of payments) {
+        const key = String(pay.penalty_id);
+        if (!map[key]) map[key] = pay;
+    }
+    return penaltyDocs.map((p) => {
+        const obj = typeof p.toObject === 'function' ? p.toObject() : { ...p };
+        obj.latest_payment = map[String(p._id)] || null;
+        return obj;
+    });
+}
+
+async function cancelPendingPenaltyPayments(penaltyId, adminId, reasonNote) {
+    const pending = await PaymentModel.find({ penalty_id: penaltyId, status: 'Pending' });
+    for (const pay of pending) {
+        pay.status = 'Failed';
+        pay.updated_at = Date.now();
+        if (adminId) pay.processed_by = adminId;
+        const suffix = ` | ${reasonNote}`;
+        pay.notes = pay.notes ? `${pay.notes}${suffix}` : suffix.trim();
+        await pay.save();
+    }
+}
+
+async function notifyAdminsPenaltyPaymentRequest(user, payment, penalty) {
+    const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+    const resourceName = penalty?.description || 'penalty';
+    for (const admin of admins) {
+        await NotificationModel.create({
+            user_id: admin._id,
+            title: 'New Penalty Payment Request',
+            message: `${user.full_name} (${user.email}) submitted a ${payment.payment_method} payment of ${payment.amount} OMR for penalty: ${resourceName}.`,
+            type: 'Info',
+            related_type: 'Payment',
+            related_id: payment._id
+        });
+    }
+}
+
+async function notifyAdminsCashPaymentAwaitingConfirmation(user, payment) {
+    const admins = await UserModel.find({ role: { $in: ['Admin', 'Assistant'] } });
+    const typeLabel =
+        payment.payment_type === 'Penalty'
+            ? 'penalty'
+            : payment.payment_type === 'Reservation'
+                ? 'reservation deposit'
+                : 'security deposit';
+    for (const admin of admins) {
+        await NotificationModel.create({
+            user_id: admin._id,
+            title: 'Cash Payment — Confirm at Hub',
+            message: `${user.full_name} (${user.email}) reported cash payment of ${payment.amount} OMR for ${typeLabel}. Open Payments Management and confirm after you receive the cash.`,
+            type: 'Warning',
+            related_type: 'Payment',
+            related_id: payment._id
+        });
+    }
+}
+
 app.get("/penalties/my-penalties", async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -3328,9 +3630,99 @@ app.get("/penalties/my-penalties", async (req, res) => {
             })
             .sort({ created_at: -1 });
 
-        res.json({ success: true, data: penalties });
+        const data = await attachLatestPaymentsToPenalties(penalties);
+        res.json({ success: true, data });
     } catch (error) {
         res.send(error);
+    }
+});
+
+// Create a pending penalty payment (Cash or Card) — same flow as borrow deposit
+app.post("/penalties/:id/start-payment", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        const decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        const user = await UserModel.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ message: 'User not found' });
+        }
+
+        const { payment_method } = req.body;
+        if (!['Cash', 'Card'].includes(payment_method)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Only Cash or Card payment methods are allowed'
+            });
+        }
+
+        const penalty = await PenaltyModel.findById(req.params.id)
+            .populate({
+                path: 'borrow_id',
+                populate: { path: 'resource_id', select: 'name' }
+            });
+
+        if (!penalty) {
+            return res.status(404).json({ success: false, message: 'Penalty not found' });
+        }
+
+        if (penalty.user_id.toString() !== user._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
+        }
+
+        if (penalty.status !== 'Pending') {
+            return res.status(400).json({
+                success: false,
+                message: `Penalty is not pending payment. Current status: ${penalty.status}`
+            });
+        }
+
+        const existingPending = await PaymentModel.findOne({
+            penalty_id: penalty._id,
+            status: 'Pending'
+        });
+
+        if (existingPending) {
+            if (existingPending.payment_method !== payment_method) {
+                existingPending.payment_method = payment_method;
+                existingPending.updated_at = Date.now();
+                await existingPending.save();
+            }
+            return res.status(200).json({
+                success: true,
+                data: existingPending,
+                message: 'Existing pending payment returned'
+            });
+        }
+
+        const resourceName = penalty.borrow_id?.resource_id?.name || 'resource';
+        const newPayment = new PaymentModel({
+            user_id: user._id,
+            penalty_id: penalty._id,
+            payment_type: 'Penalty',
+            amount: penalty.fine_amount,
+            payment_method,
+            status: 'Pending',
+            notes: `Penalty payment: ${penalty.penalty_type} — ${resourceName} (${penalty.description || ''})`.trim()
+        });
+        await newPayment.save();
+
+        await notifyAdminsPenaltyPaymentRequest(user, newPayment, penalty);
+
+        res.status(200).json({
+            success: true,
+            data: newPayment,
+            message: 'Penalty payment request created. Complete payment from My Payments.'
+        });
+    } catch (error) {
+        console.error('Start penalty payment error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to start penalty payment'
+        });
     }
 });
 
@@ -3419,9 +3811,11 @@ app.get("/admin/penalties", async (req, res) => {
 
         const total = await PenaltyModel.countDocuments(query);
 
+        const data = await attachLatestPaymentsToPenalties(penalties);
+
         res.status(200).json({
             success: true,
-            data: penalties,
+            data,
             pagination: {
                 page: parseInt(page),
                 limit: parseInt(limit),
@@ -3464,6 +3858,8 @@ app.put("/penalties/:id/waive", async (req, res) => {
         penalty.waived_by = user._id;
         penalty.waived_reason = waived_reason || 'Waived by administrator';
         await penalty.save();
+
+        await cancelPendingPenaltyPayments(penalty._id, user._id, 'Cancelled: penalty waived');
 
         const penaltyUserId = penalty.user_id?._id || penalty.user_id;
         if (penaltyUserId && (await shouldSendInAppNotification(penaltyUserId, 'penalty'))) {
@@ -3515,6 +3911,7 @@ app.put("/admin/penalties/:id/status", async (req, res) => {
         if (status === 'Waived') {
             penalty.waived_by = user._id;
             penalty.waived_reason = waived_reason || 'Waived by administrator';
+            await cancelPendingPenaltyPayments(penalty._id, user._id, 'Cancelled: penalty waived by admin');
             const pid = penalty.user_id?._id || penalty.user_id;
             if (pid && (await shouldSendInAppNotification(pid, 'penalty'))) {
                 await NotificationModel.create({
@@ -3528,6 +3925,8 @@ app.put("/admin/penalties/:id/status", async (req, res) => {
             }
         } else if (status === 'Paid' && oldStatus === 'Pending') {
             penalty.paid_at = new Date();
+        } else if (status === 'Cancelled' && oldStatus === 'Pending') {
+            await cancelPendingPenaltyPayments(penalty._id, user._id, 'Cancelled: penalty cancelled by admin');
         }
 
         await penalty.save();
@@ -3544,6 +3943,73 @@ app.put("/admin/penalties/:id/status", async (req, res) => {
 });
 
 // ==================== PAYMENTS ROUTES ====================
+
+const MAX_CARD_PAN_USAGE = 3;
+
+function normalizeCardPanDigits(pan) {
+    return String(pan || '').replace(/\D/g, '');
+}
+
+function hashCardPan(panDigits) {
+    const normalized = normalizeCardPanDigits(panDigits);
+    if (!normalized) return null;
+    const secret =
+        String(process.env.CARD_PAN_HASH_SECRET || '').trim() ||
+        'your-secret-key-change-in-production';
+    return crypto.createHmac('sha256', secret).update(normalized).digest('hex');
+}
+
+async function countCompletedPaymentsForCardPan(panDigits, excludePaymentId = null) {
+    const hash = hashCardPan(panDigits);
+    if (!hash) return 0;
+    const query = { card_pan_hash: hash, status: 'Completed' };
+    if (excludePaymentId) {
+        query._id = { $ne: excludePaymentId };
+    }
+    return PaymentModel.countDocuments(query);
+}
+
+async function getCardPanUsageStatus(panDigits, excludePaymentId = null) {
+    const usageCount = await countCompletedPaymentsForCardPan(panDigits, excludePaymentId);
+    const allowed = usageCount < MAX_CARD_PAN_USAGE;
+    return {
+        allowed,
+        usageCount,
+        maxAllowed: MAX_CARD_PAN_USAGE,
+        remaining: Math.max(0, MAX_CARD_PAN_USAGE - usageCount),
+        message: allowed
+            ? null
+            : `This card number has already been used ${usageCount} time(s). The same card cannot be used more than ${MAX_CARD_PAN_USAGE} times.`
+    };
+}
+
+app.post('/payments/check-card-usage', async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+        jwt.verify(token, 'your-secret-key-change-in-production');
+
+        const digits = normalizeCardPanDigits(req.body?.card_number);
+        if (digits.length < 13) {
+            return res.json({
+                success: true,
+                allowed: true,
+                usageCount: 0,
+                maxAllowed: MAX_CARD_PAN_USAGE,
+                remaining: MAX_CARD_PAN_USAGE
+            });
+        }
+
+        const excludePaymentId = req.body?.exclude_payment_id || null;
+        const status = await getCardPanUsageStatus(digits, excludePaymentId);
+        return res.json({ success: true, ...status });
+    } catch (error) {
+        console.error('Check card usage error:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to check card usage' });
+    }
+});
 
 app.post("/payments", async (req, res) => {
     try {
@@ -3570,54 +4036,47 @@ app.post("/payments", async (req, res) => {
             return res.status(500).json({ message: "Penalty is not pending payment" });
         }
 
-        if (amount < penalty.fine_amount) {
-            return res.status(500).json({ message: `Payment amount must be at least ${penalty.fine_amount} OMR` });
-        }
-
-        // Prepare payment data
-        const paymentData = {
-            user_id: user._id,
-            penalty_id,
-            amount,
-            payment_method,
-            transaction_id: transaction_id || undefined,
-            notes: notes || undefined,
-            status: payment_method === 'Online' ? 'Pending' : 'Completed',
-            processed_by: payment_method !== 'Online' ? user._id : null
-        };
-
-        // Add card details if payment method is Card
-        if (payment_method === 'Card' && card_details) {
-            // Store only last 4 digits for security (don't store full card number)
-            const cardNumber = card_details.card_number || '';
-            paymentData.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
-            paymentData.card_holder = card_details.card_holder || '';
-            paymentData.card_expiry = card_details.expiry_date || '';
-            if (card_details.card_network) {
-                paymentData.card_network = String(card_details.card_network).trim().slice(0, 40);
-            }
-            // Never store CVV - it's only for transaction processing
-        }
-
-        const newPayment = new PaymentModel(paymentData);
-        await newPayment.save();
-
-        if (newPayment.status === 'Completed') {
-            penalty.status = 'Paid';
-            penalty.paid_at = new Date();
-            await penalty.save();
-
-            await NotificationModel.create({
-                user_id: user._id,
-                title: 'Payment Received',
-                message: `Your payment of ${amount} OMR has been received successfully.`,
-                type: 'Success',
-                related_type: 'Payment',
-                related_id: newPayment._id
+        if (!['Cash', 'Card'].includes(payment_method)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Only Cash or Card payment methods are allowed'
             });
         }
 
-        res.status(200).json({ success: true, data: newPayment, message: "Success" });
+        const payAmount = amount >= penalty.fine_amount ? amount : penalty.fine_amount;
+
+        const existingPending = await PaymentModel.findOne({
+            penalty_id: penalty._id,
+            status: 'Pending'
+        });
+
+        if (existingPending) {
+            return res.status(200).json({
+                success: true,
+                data: existingPending,
+                message: 'Use pay-deposit on the existing pending payment record'
+            });
+        }
+
+        const newPayment = new PaymentModel({
+            user_id: user._id,
+            penalty_id,
+            payment_type: 'Penalty',
+            amount: payAmount,
+            payment_method,
+            transaction_id: transaction_id || undefined,
+            notes: notes || `Penalty payment: ${penalty.penalty_type}`,
+            status: 'Pending'
+        });
+
+        await newPayment.save();
+        await notifyAdminsPenaltyPaymentRequest(user, newPayment, penalty);
+
+        res.status(200).json({
+            success: true,
+            data: newPayment,
+            message: 'Penalty payment created. Complete it from My Payments using Pay Now.'
+        });
     } catch (error) {
         res.send(error);
     }
@@ -3701,7 +4160,7 @@ app.get("/admin/payments", async (req, res) => {
     }
 });
 
-// Allow user to complete a pending deposit/payment online (for Resource/Reservation payments)
+// Allow user to complete a pending payment (deposits, reservations, penalties)
 app.post("/payments/:id/pay-deposit", async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -3730,7 +4189,45 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
             return res.status(400).json({ message: 'Payment is not pending' });
         }
 
-        // Update basic payment info
+        const effectiveMethod = payment_method || payment.payment_method;
+
+        // Cash: user reports payment at hub — stays Pending until admin confirms
+        if (effectiveMethod === 'Cash') {
+            if (payment.cash_submitted_at) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cash payment already submitted. Please wait for admin confirmation.'
+                });
+            }
+
+            if (payment_method) payment.payment_method = payment_method;
+            if (transaction_id) payment.transaction_id = transaction_id;
+            const cashNote = notes?.trim() || 'User reported cash payment at hub';
+            payment.notes = payment.notes ? `${payment.notes} | ${cashNote}` : cashNote;
+            payment.cash_submitted_at = new Date();
+            payment.updated_at = Date.now();
+            await payment.save();
+
+            await NotificationModel.create({
+                user_id: user._id,
+                title: 'Cash Payment Submitted',
+                message: `Your cash payment of ${payment.amount} OMR has been submitted. An administrator will confirm after you pay at the hub.`,
+                type: 'Info',
+                related_type: 'Payment',
+                related_id: payment._id
+            });
+
+            await notifyAdminsCashPaymentAwaitingConfirmation(user, payment);
+
+            return res.status(200).json({
+                success: true,
+                data: payment,
+                awaitingAdminConfirmation: true,
+                message: 'Cash payment submitted. An administrator will confirm after you pay at the hub.'
+            });
+        }
+
+        // Update basic payment info (card)
         if (payment_method) {
             payment.payment_method = payment_method;
         }
@@ -3743,9 +4240,33 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
 
         // Store limited card details if provided
         if (card_details && card_details.card_number) {
-            const cardNumber = card_details.card_number || '';
+            const holderCheck = validateCardHolderName(card_details.card_holder);
+            if (!holderCheck.ok) {
+                return res.status(400).json({ success: false, message: holderCheck.message });
+            }
+
+            const selectedNetwork =
+                String(card_details.card_network || '').trim() === 'Mastercard' ? 'Mastercard' : 'Visa';
+            const panCheck = validateCardNumberFull(card_details.card_number, selectedNetwork);
+            if (!panCheck.ok) {
+                return res.status(400).json({ success: false, message: panCheck.message });
+            }
+
+            const cardNumber = panCheck.digits;
+
+            const usageStatus = await getCardPanUsageStatus(cardNumber, payment._id);
+            if (!usageStatus.allowed) {
+                return res.status(400).json({
+                    success: false,
+                    message: usageStatus.message,
+                    usageCount: usageStatus.usageCount,
+                    maxAllowed: usageStatus.maxAllowed
+                });
+            }
+
+            payment.card_pan_hash = hashCardPan(cardNumber);
             payment.card_last4 = cardNumber.length >= 4 ? cardNumber.slice(-4) : '';
-            payment.card_holder = card_details.card_holder || '';
+            payment.card_holder = holderCheck.value;
             payment.card_expiry = card_details.expiry_date || '';
             if (card_details.card_network) {
                 payment.card_network = String(card_details.card_network).trim().slice(0, 40);
@@ -3792,14 +4313,28 @@ app.post("/payments/:id/pay-deposit", async (req, res) => {
 
         await payment.save();
 
+        const paymentTypeLabel =
+            payment.payment_type === 'Penalty'
+                ? 'penalty'
+                : payment.payment_type === 'Reservation'
+                    ? 'reservation deposit'
+                    : 'security deposit';
+
         await NotificationModel.create({
             user_id: user._id,
             title: 'Payment Confirmed',
-            message: `Your payment of ${payment.amount} OMR has been confirmed.`,
+            message: `Your ${paymentTypeLabel} payment of ${payment.amount} OMR has been recorded. Admin will confirm if required.`,
             type: 'Success',
             related_type: 'Payment',
             related_id: payment._id
         });
+
+        if (payment.payment_type === 'Penalty') {
+            const penaltyForNotify = payment.penalty_id
+                ? await PenaltyModel.findById(payment.penalty_id)
+                : null;
+            await notifyAdminsPenaltyPaymentRequest(user, payment, penaltyForNotify);
+        }
 
         res.status(200).json({
             success: true,
@@ -3941,7 +4476,7 @@ app.get("/admin/dashboard", async (req, res) => {
             return res.status(500).json({ message: "Not authorized" });
         }
 
-        const [totalUsers, totalResources, activeBorrows, pendingReservations, overdueBorrows, pendingPenalties, totalRevenue, recentBorrows, availableResources, maintenanceResources, returnedBorrows] = await Promise.all([
+        const [totalUsers, totalResources, activeBorrows, pendingReservations, overdueBorrows, pendingPenalties, totalRevenue, recentBorrows, resourceQuantityAgg, maintenanceResources, returnedBorrows, borrowedResourceTypes, reservedResources, lostResources] = await Promise.all([
             UserModel.countDocuments(),
             ResourceModel.countDocuments(),
             BorrowModel.countDocuments({ status: 'Active' }),
@@ -3957,10 +4492,26 @@ app.get("/admin/dashboard", async (req, res) => {
                 .populate('resource_id', 'name category')
                 .sort({ borrow_date: -1 })
                 .limit(10),
-            ResourceModel.countDocuments({ status: 'Available' }),
+            ResourceModel.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalUnits: { $sum: { $ifNull: ['$total_quantity', 1] } },
+                        availableUnits: { $sum: { $ifNull: ['$available_quantity', 0] } }
+                    }
+                }
+            ]),
             ResourceModel.countDocuments({ status: 'Maintenance' }),
-            BorrowModel.countDocuments({ status: 'Returned' })
+            BorrowModel.countDocuments({ status: 'Returned' }),
+            ResourceModel.countDocuments({ status: 'Borrowed' }),
+            ResourceModel.countDocuments({ status: 'Reserved' }),
+            ResourceModel.countDocuments({ status: 'Lost' })
         ]);
+
+        const quantityStats = resourceQuantityAgg[0] || { totalUnits: 0, availableUnits: 0 };
+        const totalResourceUnits = quantityStats.totalUnits || 0;
+        const availableResources = quantityStats.availableUnits || 0;
+        const unitsOnLoan = Math.max(0, totalResourceUnits - availableResources);
 
         const revenue = totalRevenue.length > 0 ? totalRevenue[0].total : 0;
 
@@ -3988,8 +4539,13 @@ app.get("/admin/dashboard", async (req, res) => {
                     pendingPenalties,
                     totalRevenue: revenue,
                     availableResources,
+                    totalResourceUnits,
+                    unitsOnLoan,
                     maintenanceResources,
-                    returnedBorrows
+                    returnedBorrows,
+                    borrowedResources: borrowedResourceTypes,
+                    reservedResources,
+                    lostResources
                 },
                 charts: {
                     resourcesByCategory,
@@ -4642,18 +5198,15 @@ app.get("/resources/scan/:code", async (req, res) => {
         const exactNoCase = new RegExp(`^${escaped}$`, 'i');
 
         let resource = await ResourceModel.findOne({
-            $or: [{ barcode: exactNoCase }, { qr_code: exactNoCase }]
+            $or: [
+                { barcode: exactNoCase },
+                { qr_code: exactNoCase },
+                { name: exactNoCase }
+            ]
         });
         // Fallback: if code is 24 hex chars, treat as MongoDB _id (e.g. printed QR with _id)
         if (!resource && /^[a-fA-F0-9]{24}$/.test(code)) {
             resource = await ResourceModel.findById(code);
-        }
-        // Fallback: asset tag stored as resource name (only when unambiguous)
-        if (!resource) {
-            const byName = await ResourceModel.find({ name: exactNoCase }).limit(2).select('_id');
-            if (byName.length === 1) {
-                resource = await ResourceModel.findById(byName[0]._id);
-            }
         }
 
         if (!resource) {
@@ -5376,6 +5929,527 @@ async function abiChatCompletionCompatible({ apiKey, baseURL, model, systemPromp
     return (completion.choices?.[0]?.message?.content || '').trim();
 }
 
+
+const ABI_FAQ_TOPICS = [
+    {
+        keywords: [
+            'borrowing rule', 'borrow rule', 'rules for borrow', 'loan rule', 'policy', 'terms',
+            'department', 'who can borrow', 'approval', 'deposit required', 'security deposit',
+            'قواعد الاستعارة', 'شروط الاستعارة', 'قوانين الاستعارة', 'سياسة الاستعارة', 'شروط الاقتراض',
+            'من يستطيع', 'موافقة الادمن', 'عربون', 'قسم'
+        ],
+        reply:
+            'Borrowing rules in this hub:\n\n• Start from Resources or a resource detail page, choose an available item, open Borrow, accept the terms, and set the borrow/due dates as the form shows.\n• If the resource has a department set, only users whose profile department matches that resource department can borrow or reserve it. Admin and Assistant roles bypass this rule.\n• If a refundable security deposit is required and you choose Card, complete the payment from Payments first; the request is then ready for staff/admin review. If no card deposit is required, the request still goes through admin approval.\n• You will get updates in Notifications when your request is approved or rejected.'
+    },
+    {
+        keywords: [
+            'return deadline', 'due date', 'when return', 'overdue', 'late return', 'days left',
+            'deadline', 'return by', 'how long', 'loan period',
+            'موعد الارجاع', 'موعد الإرجاع', 'تاريخ الاستحقاق', 'متى ارجع', 'متى أرجع',
+            'تأخير', 'متأخر', 'فات الموعد', 'كم يوم'
+        ],
+        reply:
+            'Return deadlines:\n\n• Each active borrow has a due date shown in My Borrows (and in your loan details).\n• Return the physical item on or before that due date to avoid overdue status.\n• To start a return: My Borrows → your active borrow → request return. Hub staff must confirm the physical return in the system before the borrow is fully completed.\n• If you are unsure of a specific date, open My Borrows and check the due date for that resource.'
+    },
+    {
+        keywords: [
+            'availability', 'available', 'in stock', 'check if available', 'is it free',
+            'can i borrow', 'resource available', 'catalog', 'search resource',
+            'التوفر', 'متاح', 'متوفرة', 'هل متوفر', 'الموارد المتاحة', 'فحص التوفر', 'هل يمكنني استعارة'
+        ],
+        reply:
+            'Resource availability:\n\n• Browse the catalog under Resources; use search and filters to find items.\n• On a resource detail page, use the availability check for a specific borrow date before you confirm a borrow — the app checks whether the item can be borrowed for that period.\n• Availability also depends on stock (available quantity) and whether the item is already on loan for overlapping dates.\n• If a resource is restricted by department, your profile department must match to borrow or reserve.'
+    },
+    {
+        keywords: ['how do i borrow', 'how to borrow', 'borrow a device', 'checkout', 'كيف استعير', 'كيف أستعير', 'خطوات الاستعارة'],
+        reply:
+            'To borrow: open Resources, pick an available device, click Borrow, accept the terms, set the due/borrow dates as prompted, and submit. If a card deposit is required, pay from Payments first, then wait for admin approval.'
+    },
+    {
+        keywords: ['how do i reserve', 'how to reserve', 'make a reservation', 'pickup date', 'كيف احجز', 'كيف أحجز', 'حجز'],
+        reply:
+            'To reserve: open Resources or the resource detail page, click Reserve, choose pickup and expiry dates, accept the terms, and submit. If a card deposit is required, complete it in Payments before admin review.'
+    },
+    {
+        keywords: ['payment', 'deposit', 'card', 'cash', 'دفع', 'عربون'],
+        reply:
+            'You can review pending deposits in Payments. Card payments can be completed online; cash payments may await admin confirmation. After a completed deposit, the admin is notified that the request is ready for review.'
+    },
+    {
+        keywords: ['how can i return', 'how to return', 'request return', 'إرجاع', 'ارجاع', 'lost item', 'overdue'],
+        reply:
+            'Go to My Borrows, find the active borrow, and request return. Physical return must be confirmed by hub staff in the system before the process is fully completed. Overdue or damaged items may lead to penalties.'
+    },
+    {
+        keywords: ['notification', 'notice', 'إشعار', 'اشعار'],
+        reply:
+            'Open Notifications from the sidebar. You will see approvals, rejections, payment events, returns, refunds, and other system messages.'
+    },
+    {
+        keywords: ['profile', 'password', 'account', 'ملف', 'حساب'],
+        reply: 'You can manage your personal details from Profile, including password and account information.'
+    },
+    {
+        keywords: ['qr', 'barcode', 'scan', 'مسح'],
+        reply:
+            'QR and barcode scanning help identify resources quickly. Students and staff typically use Resources, My Borrows, Reservations, Payments, and Notifications.'
+    }
+];
+
+/** FAQ Support — instant match for borrowing rules, deadlines, availability, etc. Returns null if no strong match. */
+function matchAbiInstantFaq(messageText = '') {
+    const trimmed = String(messageText || '').trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+    let bestReply = null;
+    let bestScore = 0;
+    for (const topic of ABI_FAQ_TOPICS) {
+        let score = 0;
+        for (const kw of topic.keywords) {
+            const k = kw.toLowerCase();
+            if (lower.includes(k) || trimmed.includes(kw)) {
+                score += Math.max(2, Math.min(k.length, 12));
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            bestReply = topic.reply;
+        }
+    }
+    return bestScore >= 2 ? bestReply : null;
+}
+
+/** Fallback FAQ replies when no AI provider is available. */
+function getAbiFallbackReply(messageText = '') {
+    const instant = matchAbiInstantFaq(messageText);
+    if (instant) return instant;
+
+    return 'I am Abi, your UTAS Borrowing Hub assistant (FAQ Support). Ask about borrowing rules, return deadlines, resource availability, reservations, payments, returns, or notifications — or log in so I can check your borrows and the live catalog.';
+}
+
+/**
+ * OpenAI-compatible tool definitions for the Abi assistant.
+ */
+function getAbiTools() {
+    return [
+        {
+            type: 'function',
+            function: {
+                name: 'search_resources',
+                description: 'Search for resources by name, category, college, or department.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        query: { type: 'string', description: 'Search term matching resource name or description' },
+                        category: { type: 'string', description: 'Filter by category (e.g. Laptop, Projector, Tablet)' },
+                        college: { type: 'string', description: 'Filter by college' },
+                        department: { type: 'string', description: 'Filter by department name' },
+                        status: { type: 'string', enum: ['Available', 'Borrowed', 'Reserved', 'Maintenance', 'Lost'] }
+                    }
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_resource_availability',
+                description: 'Check if a specific resource is currently available for borrowing',
+                parameters: { type: 'object', properties: { resource_id: { type: 'string', description: 'MongoDB ObjectId' } }, required: ['resource_id'] }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_resource_details',
+                description: 'Get detailed information about a specific resource',
+                parameters: { type: 'object', properties: { resource_id: { type: 'string', description: 'MongoDB ObjectId' } }, required: ['resource_id'] }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_my_borrows',
+                description: "Get the current user's borrow records",
+                parameters: { type: 'object', properties: { status: { type: 'string', enum: ['Active', 'Returned', 'Overdue', 'PendingApproval', 'PendingReturn'] } } }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_my_reservations',
+                description: "Get the current user's reservation records",
+                parameters: { type: 'object', properties: { status: { type: 'string', enum: ['Pending', 'Confirmed', 'Cancelled', 'Completed', 'Expired'] } } }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_my_penalties',
+                description: "Get the current user's penalties/fines",
+                parameters: { type: 'object', properties: {} }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_notifications',
+                description: "Get the current user's notifications",
+                parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of notifications (default 10)' } } }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_borrowing_policies',
+                description: 'Get system borrowing rules and policies',
+                parameters: { type: 'object', properties: {} }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'create_reservation',
+                description: 'Create a reservation for a resource',
+                parameters: { type: 'object', properties: { resource_id: { type: 'string' }, pickup_date: { type: 'string' }, expiry_date: { type: 'string' } }, required: ['resource_id', 'pickup_date'] }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_popular_resources',
+                description: 'Get the most borrowed or popular resources',
+                parameters: { type: 'object', properties: { limit: { type: 'number' } } }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_dashboard_stats',
+                description: 'Get dashboard summary statistics (admin only)',
+                parameters: { type: 'object', properties: {} }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'get_system_overview',
+                description: 'Get an overview of everything in the system',
+                parameters: { type: 'object', properties: {} }
+            }
+        }
+    ];
+}
+
+const BORROW_OUT_STATUSES = ['Active', 'Overdue', 'PendingReturn'];
+
+/** Execute an Abi tool and return JSON string result. */
+async function executeAbiTool(toolName, args, userId, userRole = 'Student') {
+    const ADMIN_TOOLS = ['get_dashboard_stats', 'get_system_overview'];
+    if (ADMIN_TOOLS.includes(toolName) && userRole !== 'Admin') {
+        return JSON.stringify({ error: 'This tool is only available to administrators.' });
+    }
+    try {
+        switch (toolName) {
+            case 'search_resources': {
+                const filter = {};
+                if (args.query) {
+                    const escaped = args.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    filter.$or = [
+                        { name: { $regex: escaped, $options: 'i' } },
+                        { description: { $regex: escaped, $options: 'i' } },
+                        { barcode: { $regex: escaped, $options: 'i' } },
+                        { qr_code: { $regex: escaped, $options: 'i' } }
+                    ];
+                }
+                if (args.category) filter.category = args.category;
+                if (args.college) filter.college = args.college;
+                if (args.department) filter.department = args.department;
+                if (args.status) filter.status = args.status;
+                const resources = await ResourceModel.find(filter).limit(20).lean();
+                return JSON.stringify({
+                    total_count: resources.length,
+                    resources: resources.map(r => ({
+                        _id: r._id, name: r.name, category: r.category,
+                        college: r.college, department: r.department, status: r.status,
+                        available_quantity: r.available_quantity, total_quantity: r.total_quantity,
+                        location: r.location, requires_payment: r.requires_payment, payment_amount: r.payment_amount
+                    }))
+                });
+            }
+            case 'get_resource_availability': {
+                const resource = await ResourceModel.findById(args.resource_id).lean();
+                if (!resource) return JSON.stringify({ error: 'Resource not found' });
+                const activeBorrows = await BorrowModel.countDocuments({
+                    resource_id: args.resource_id,
+                    status: { $in: BORROW_OUT_STATUSES }
+                });
+                return JSON.stringify({ name: resource.name, status: resource.status, available_quantity: resource.available_quantity, currently_borrowed: activeBorrows, currently_available: Math.max(0, (resource.available_quantity || 0) - activeBorrows) });
+            }
+            case 'get_resource_details': {
+                const resource = await ResourceModel.findById(args.resource_id).lean();
+                if (!resource) return JSON.stringify({ error: 'Resource not found' });
+                const activeBorrows = await BorrowModel.countDocuments({
+                    resource_id: args.resource_id,
+                    status: { $in: BORROW_OUT_STATUSES }
+                });
+                return JSON.stringify({ ...resource, _id: resource._id.toString(), currently_borrowed: activeBorrows, currently_available: Math.max(0, (resource.available_quantity || 0) - activeBorrows) });
+            }
+            case 'get_my_borrows': {
+                const filter = { user_id: userId };
+                if (args.status) filter.status = args.status;
+                const borrows = await BorrowModel.find(filter).populate('resource_id', 'name category barcode').sort({ created_at: -1 }).limit(10).lean();
+                return JSON.stringify(borrows.map(b => ({ _id: b._id, resource: b.resource_id?.name || 'Unknown', category: b.resource_id?.category || '', status: b.status, borrow_date: b.borrow_date, due_date: b.due_date, return_date: b.return_date })));
+            }
+            case 'get_my_reservations': {
+                const filter = { user_id: userId };
+                if (args.status) filter.status = args.status;
+                const reservations = await ReservationModel.find(filter).populate('resource_id', 'name category').sort({ created_at: -1 }).limit(10).lean();
+                return JSON.stringify(reservations.map(r => ({ _id: r._id, resource: r.resource_id?.name || 'Unknown', status: r.status, pickup_date: r.pickup_date, expiry_date: r.expiry_date })));
+            }
+            case 'get_my_penalties': {
+                const penalties = await PenaltyModel.find({ user_id: userId }).sort({ created_at: -1 }).limit(10).lean();
+                return JSON.stringify(penalties.map(p => ({ _id: p._id, amount: p.amount, reason: p.reason, status: p.status, created_at: p.created_at })));
+            }
+            case 'get_notifications': {
+                const limit = args.limit || 10;
+                const notifications = await NotificationModel.find({ user_id: userId }).sort({ created_at: -1 }).limit(limit).lean();
+                return JSON.stringify(notifications.map(n => ({ _id: n._id, title: n.title, message: n.message, type: n.type, is_read: n.is_read, created_at: n.created_at })));
+            }
+            case 'get_borrowing_policies': {
+                return JSON.stringify({ max_borrow_days: 'Default 7 days, configurable per resource', max_active_borrows: 'Varies by user role and resource availability', reservation_expiry: 'Default 7 days from pickup date' });
+            }
+            case 'create_reservation': {
+                const resource = await ResourceModel.findById(args.resource_id);
+                if (!resource) return JSON.stringify({ error: 'Resource not found' });
+                const existing = await ReservationModel.findOne({ user_id: userId, resource_id: args.resource_id, status: { $in: ['Pending', 'Confirmed'] } });
+                if (existing) return JSON.stringify({ error: 'You already have an active reservation for this resource' });
+                const reservation = new ReservationModel({ user_id: userId, resource_id: args.resource_id, pickup_date: new Date(args.pickup_date), expiry_date: args.expiry_date ? new Date(args.expiry_date) : new Date(new Date(args.pickup_date).getTime() + 7 * 24 * 60 * 60 * 1000), status: 'Pending' });
+                await reservation.save();
+                return JSON.stringify({ success: true, message: 'Reservation created successfully', reservation_id: reservation._id });
+            }
+            case 'get_popular_resources': {
+                const limit = args.limit || 5;
+                const popular = await BorrowModel.aggregate([
+                    { $group: { _id: '$resource_id', count: { $sum: 1 } } },
+                    { $sort: { count: -1 } }, { $limit: limit },
+                    { $lookup: { from: 'Resources', localField: '_id', foreignField: '_id', as: 'resource' } },
+                    { $unwind: { path: '$resource', preserveNullAndEmptyArrays: true } }
+                ]);
+                return JSON.stringify(popular.map(p => ({ name: p.resource?.name || 'Unknown', category: p.resource?.category || '', borrow_count: p.count })));
+            }
+            case 'get_dashboard_stats': {
+                const totalResources = await ResourceModel.countDocuments();
+                const availableResources = await ResourceModel.countDocuments({ status: 'Available', available_quantity: { $gt: 0 } });
+                const totalBorrows = await BorrowModel.countDocuments();
+                const activeBorrows = await BorrowModel.countDocuments({ status: { $in: BORROW_OUT_STATUSES } });
+                const totalUsers = await UserModel.countDocuments();
+                const totalPenalties = await PenaltyModel.countDocuments({ status: 'Unpaid' });
+                return JSON.stringify({ totalResources, availableResources, totalBorrows, activeBorrows, totalUsers, unpaidPenalties: totalPenalties });
+            }
+            case 'get_system_overview': {
+                const totalResources = await ResourceModel.countDocuments();
+                const collegeStats = await ResourceModel.aggregate([{ $group: { _id: '$college', count: { $sum: 1 } } }, { $sort: { count: -1 } }]);
+                const categoryStats = await ResourceModel.aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }, { $sort: { count: -1 } }]);
+                const statusStats = await ResourceModel.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }, { $sort: { count: -1 } }]);
+                const totalUsers = await UserModel.countDocuments();
+                const totalBorrows = await BorrowModel.countDocuments();
+                const activeBorrows = await BorrowModel.countDocuments({ status: { $in: BORROW_OUT_STATUSES } });
+                const totalReservations = await ReservationModel.countDocuments();
+                const pendingPenalties = await PenaltyModel.countDocuments({ status: 'Unpaid' });
+                return JSON.stringify({
+                    resources: { total: totalResources, by_college: collegeStats, by_category: categoryStats, by_status: statusStats },
+                    users: { total: totalUsers },
+                    borrows: { total: totalBorrows, active: activeBorrows },
+                    reservations: { total: totalReservations },
+                    penalties: { unpaid: pendingPenalties }
+                });
+            }
+            default:
+                return JSON.stringify({ error: 'Unknown tool: ' + toolName });
+        }
+    } catch (error) {
+        return JSON.stringify({ error: error.message });
+    }
+}
+
+/** Get AI reply with tool calling support (for OpenAI / OpenRouter). */
+async function getAbiReply({ message, user, messageHistory }) {
+    if (!message.trim()) return 'Please ask me a question about the UTAS Borrowing Hub system.';
+
+    const openaiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+    const openrouterApiKey = String(process.env.OPENROUTER_API_KEY || '').trim();
+
+    if (!openaiApiKey && !openrouterApiKey) {
+        return getAbiFallbackReply(message);
+    }
+
+    const modelUserMessage = abiAugmentUserMessageForLanguage(message);
+    const appendixParts = [];
+    const catalogAppendix = await abiBuildLiveCatalogAppendix(message);
+    if (catalogAppendix) appendixParts.push(catalogAppendix);
+    const borrowsAppendix = await abiBuildMyBorrowsAppendix(message, user._id);
+    if (borrowsAppendix) appendixParts.push(borrowsAppendix);
+    const sentUserMessage =
+        appendixParts.length > 0
+            ? `${modelUserMessage}\n\n---\n\n${appendixParts.join('\n\n---\n\n')}`
+            : modelUserMessage;
+
+    const isAdmin = user?.role === 'Admin' || user?.role === 'Assistant';
+    const commonTools = [
+        '- search_resources: Search resources. Params: query, category, college, department, status',
+        '- get_resource_availability: Check availability. Params: resource_id',
+        '- get_resource_details: Get resource details. Params: resource_id',
+        '- get_my_borrows: Get your borrows. Params: status',
+        '- get_my_reservations: Get your reservations. Params: status',
+        '- get_my_penalties: Get your penalties.',
+        '- get_notifications: Get notifications. Params: limit',
+        '- get_borrowing_policies: Get policies.',
+        '- create_reservation: Create reservation. Params: resource_id, pickup_date, expiry_date',
+        '- get_popular_resources: Popular resources. Params: limit'
+    ];
+    const adminOnlyTools = [
+        '- get_dashboard_stats: Admin dashboard statistics. (Admin only)',
+        '- get_system_overview: Overview counts by college/category/status. (Admin only)'
+    ];
+    const userRules =
+        '- You can ONLY access data belonging to the current user (their borrows, reservations, penalties, notifications).\n' +
+        '- You CANNOT view other users\' data, dashboard statistics, or system overview.\n' +
+        '- Users can browse/search resources freely — that is public data.';
+    const adminRules =
+        '- You have FULL access to all data including all users\' borrows, dashboard stats, and system overview.\n' +
+        '- If someone asks about another user\'s records, you can look it up (but respect privacy).';
+
+    const systemPrompt =
+        'You are the UTAS Borrowing Hub AI assistant for ' + (isAdmin ? 'ADMINISTRATORS' : 'users') + '.\n\n' +
+        'Your job is to help ' + (isAdmin ? 'manage the system, view all data, and assist users' : 'find resources, manage your borrows, and answer questions') + '.\n\n' +
+        'To look up data from the database, you MUST output a tool request in EXACTLY this format on its own line:\n' +
+        'TOOL_CALL: tool_name | param=value | param2=value\n\n' +
+        'Available tools:\n' +
+        commonTools.join('\n') + '\n' +
+        (isAdmin ? adminOnlyTools.join('\n') + '\n\n' : '\n') +
+        'EXAMPLES:\n' +
+        'User: "how many devices in Information Technology"\nYou: TOOL_CALL: search_resources | college=Information Technology\n\n' +
+        'User: "show me laptops"\nYou: TOOL_CALL: search_resources | category=Laptop\n\n' +
+        (isAdmin ? '' : 'User: "my borrows"\nYou: TOOL_CALL: get_my_borrows\n\n') +
+        'User: "what is available"\nYou: TOOL_CALL: search_resources | status=Available\n\n' +
+        'IMPORTANT RULES:\n' +
+        '- When you need data, ALWAYS output a TOOL_CALL line. Call only ONE tool per response. Wait for the result before continuing.\n' +
+        '- The "college" field stores which college owns the item (Information Technology, Science, etc). NOT the "department" field.\n' +
+        '- Never guess data — always use a TOOL_CALL to look it up.\n' +
+        '- Keep answers concise and practical (2-5 short steps when useful).\n' +
+        (isAdmin ? adminRules + '\n' : userRules + '\n') +
+        '- Current user: ' + (user?.full_name || 'Unknown') + ' (Role: ' + (user?.role || 'Student') + ')';
+
+    const messages = [
+        { role: 'system', content: systemPrompt },
+        ...(Array.isArray(messageHistory) ? messageHistory : []),
+        { role: 'user', content: sentUserMessage }
+    ];
+
+    try {
+        const apiKey = openrouterApiKey || openaiApiKey;
+        const baseURL = openrouterApiKey
+            ? (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '')
+            : undefined;
+        const model = openrouterApiKey
+            ? (process.env.OPENROUTER_MODEL || process.env.AI_MODEL || 'inclusionai/ring-2.6-1t:free')
+            : (process.env.OPENAI_MODEL || 'gpt-4o-mini');
+
+        const client = new OpenAI({
+            apiKey,
+            ...(baseURL ? { baseURL } : {}),
+            ...(!!openrouterApiKey ? { defaultHeaders: { 'HTTP-Referer': process.env.OPENROUTER_HTTP_REFERER || process.env.FRONTEND_URL || 'http://localhost:3000', 'X-Title': process.env.OPENROUTER_APP_TITLE || 'UTAS Borrowing Hub' } } : {})
+        });
+
+        const completion = await client.chat.completions.create({
+            model,
+            messages: [
+                ...messages,
+                { role: 'system', content: 'Use the available tools when you need data from the database. Otherwise just answer directly.' }
+            ],
+            tools: getAbiTools(),
+            tool_choice: 'auto',
+            max_tokens: 500
+        });
+
+        const choice = completion.choices?.[0];
+        if (!choice) return getAbiFallbackReply(message);
+
+        const toolCalls = choice.message?.tool_calls;
+        if (toolCalls && toolCalls.length > 0) {
+            const toolResults = [];
+            for (const tc of toolCalls) {
+                if (tc.type === 'function') {
+                    const args = safeJsonParse(tc.function.arguments, {});
+                    const result = await executeAbiTool(tc.function.name, args, user._id, user.role);
+                    toolResults.push({ role: 'tool', tool_call_id: tc.id, content: result });
+                }
+            }
+
+            const secondMessages = [
+                ...messages,
+                choice.message,
+                ...toolResults,
+                { role: 'system', content: 'The tools returned data above. Now answer the user\'s question based on this data. Be concise and friendly.' }
+            ];
+
+            const secondCompletion = await client.chat.completions.create({
+                model,
+                messages: secondMessages,
+                max_tokens: 500
+            });
+
+            const finalText = secondCompletion.choices?.[0]?.message?.content?.trim();
+            return finalText || getAbiFallbackReply(message);
+        }
+
+        let rawText = choice.message?.content?.trim() || '';
+        const toolCallMatch = rawText.match(/TOOL_CALL:\s*(\w+)((?:\s*\|\s*\w+\s*=\s*[^|]+)*)/);
+
+        if (toolCallMatch) {
+            const toolName = toolCallMatch[1];
+            const paramsPart = toolCallMatch[2].trim();
+            const args = {};
+
+            if (paramsPart) {
+                const paramPairs = paramsPart.split('|').map(p => p.trim()).filter(Boolean);
+                for (const pair of paramPairs) {
+                    const eqIdx = pair.indexOf('=');
+                    if (eqIdx > 0) {
+                        args[pair.substring(0, eqIdx).trim()] = pair.substring(eqIdx + 1).trim();
+                    }
+                }
+            }
+
+            const result = await executeAbiTool(toolName, args, user._id, user.role);
+
+            const secondCompletion = await client.chat.completions.create({
+                model,
+                messages: [
+                    ...messages,
+                    { role: 'assistant', content: rawText },
+                    { role: 'system', content: 'The tool returned this data:\n' + result + '\n\nNow answer the user\'s question based on this data. Be concise and friendly.' }
+                ],
+                max_tokens: 500
+            });
+
+            const finalText = secondCompletion.choices?.[0]?.message?.content?.trim();
+            return finalText || getAbiFallbackReply(message);
+        }
+
+        return rawText || getAbiFallbackReply(message);
+    } catch (error) {
+        console.error('Abi AI error:', error.message);
+        return getAbiFallbackReply(message);
+    }
+}
+
+function safeJsonParse(str, fallback) {
+    try { return JSON.parse(str); } catch { return fallback; }
+}
+function safeJsonStringify(val) {
+    try { return JSON.stringify(val); } catch { return String(val); }
+}
 app.post("/assistant/abi-chat", async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -5398,7 +6472,19 @@ app.post("/assistant/abi-chat", async (req, res) => {
             return res.status(400).json({ success: false, message: 'Message is too long' });
         }
 
-        const useOllama = ['1', 'true', 'yes'].includes(String(process.env.USE_OLLAMA || '').toLowerCase());
+        const session_id = String(req.body?.session_id || '');
+        let messageHistory = [];
+        if (session_id) {
+            const chat = await ChatModel.findOne({ user_id: user._id, session_id });
+            if (chat) {
+                messageHistory = chat.messages
+                    .filter(m => m.role !== 'system')
+                    .slice(-20)
+                    .map(m => ({ role: m.role, content: m.content }));
+            }
+        }
+
+                const useOllama = ['1', 'true', 'yes'].includes(String(process.env.USE_OLLAMA || '').toLowerCase());
         const openaiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
         const openrouterApiKey = String(process.env.OPENROUTER_API_KEY || '').trim();
         const openrouterBase =
@@ -5417,9 +6503,10 @@ app.post("/assistant/abi-chat", async (req, res) => {
                 ? `${modelUserMessage}\n\n---\n\n${appendixParts.join('\n\n---\n\n')}`
                 : modelUserMessage;
 
-        let reply = '';
+        const needsLiveData = abiWantsResourceCatalog(message) || abiWantsMyBorrowsContext(message);
+        let reply = (!needsLiveData && matchAbiInstantFaq(message)) || '';
 
-        if (useOllama) {
+        if (!reply && useOllama) {
             try {
                 reply = await abiCompleteWithOllama(ABI_FULL_SYSTEM_PROMPT, sentUserMessage);
             } catch (ollamaErr) {
@@ -5437,46 +6524,43 @@ app.post("/assistant/abi-chat", async (req, res) => {
             }
         }
 
-        if (!reply && openrouterApiKey) {
+        if (!reply && hasCloudFallback) {
             try {
-                reply = await abiChatCompletionCompatible({
-                    apiKey: openrouterApiKey,
-                    baseURL: openrouterBase,
-                    model: openrouterModel,
-                    systemPrompt: ABI_FULL_SYSTEM_PROMPT,
-                    userContent: sentUserMessage
-                });
-            } catch (orErr) {
-                console.warn('Abi: OpenRouter request failed.', orErr?.message || orErr);
-            }
-        }
-
-        if (!reply && openaiApiKey) {
-            try {
-                reply = await abiChatCompletionCompatible({
-                    apiKey: openaiApiKey,
-                    baseURL: undefined,
-                    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-                    systemPrompt: ABI_FULL_SYSTEM_PROMPT,
-                    userContent: sentUserMessage
-                });
-            } catch (oaErr) {
-                console.warn('Abi: direct OpenAI request failed.', oaErr?.message || oaErr);
+                reply = await getAbiReply({ message, user, messageHistory });
+            } catch (abiErr) {
+                console.warn('Abi: getAbiReply failed.', abiErr?.message || abiErr);
             }
         }
 
         if (!reply) {
-            if (!useOllama && !hasCloudFallback) {
+            reply = getAbiFallbackReply(message);
+            if (!reply) {
                 return res.status(503).json({
                     success: false,
-                    message:
-                        'Abi chat is not configured. Add OPENROUTER_API_KEY (https://openrouter.ai) and OPENROUTER_MODEL, or OPENAI_API_KEY, or set USE_OLLAMA=true with a local Ollama model. Restart the server after editing server/.env. / أضف OPENROUTER_API_KEY أو OPENAI_API_KEY أو USE_OLLAMA=true'
+                    message: "Abi could not generate a reply. Check server/.env for OPENROUTER_API_KEY or OPENAI_API_KEY or set USE_OLLAMA=true."
                 });
             }
-            return res.status(502).json({ success: false, message: 'No reply from the language model.' });
         }
 
-        res.json({ success: true, data: { reply } });
+        
+        const finalSessionId = session_id || `${user._id}_${Date.now()}`;
+        await ChatModel.findOneAndUpdate(
+            { user_id: user._id, session_id: finalSessionId },
+            {
+                $push: {
+                    messages: {
+                        $each: [
+                            { role: 'user', content: message },
+                            { role: 'assistant', content: reply }
+                        ]
+                    }
+                },
+                $setOnInsert: { title: message.length > 50 ? message.substring(0, 50) + '...' : message }
+            },
+            { upsert: true }
+        );
+
+        res.json({ success: true, data: { reply, session_id: finalSessionId } });
     } catch (error) {
         console.error('Abi chat error:', error);
         const httpStatus = error?.status;
@@ -5499,6 +6583,88 @@ app.post("/assistant/abi-chat", async (req, res) => {
             success: false,
             message: msg
         });
+    }
+});
+
+
+// ==================== ABI CHAT SESSIONS ====================
+
+app.get("/assistant/abi-chat/sessions", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        } catch (e) {
+            return res.status(401).json({ success: false, message: 'Invalid token' });
+        }
+
+        const sessions = await ChatModel.find(
+            { user_id: decoded.id },
+            { session_id: 1, title: 1, updatedAt: 1, _id: 0 }
+        ).sort({ updatedAt: -1 }).limit(50).lean();
+
+        return res.json({ success: true, data: sessions });
+    } catch (error) {
+        console.error('Chat sessions error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get("/assistant/abi-chat/sessions/:sessionId", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        } catch (e) {
+            return res.status(401).json({ success: false, message: 'Invalid token' });
+        }
+
+        const chat = await ChatModel.findOne(
+            { user_id: decoded.id, session_id: req.params.sessionId },
+            { messages: 1, title: 1, _id: 0 }
+        ).lean();
+
+        if (!chat) {
+            return res.status(404).json({ success: false, message: 'Session not found' });
+        }
+
+        return res.json({ success: true, data: chat });
+    } catch (error) {
+        console.error('Chat session detail error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.delete("/assistant/abi-chat/sessions/:sessionId", async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not authorized' });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, 'your-secret-key-change-in-production');
+        } catch (e) {
+            return res.status(401).json({ success: false, message: 'Invalid token' });
+        }
+
+        await ChatModel.deleteOne({ user_id: decoded.id, session_id: req.params.sessionId });
+
+        return res.json({ success: true, message: 'Session deleted' });
+    } catch (error) {
+        console.error('Chat session delete error:', error);
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 

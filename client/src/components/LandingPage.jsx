@@ -1,4 +1,5 @@
 import { Container, Row, Col, Button, Navbar, NavbarBrand, Nav, NavItem, NavLink, Card, CardBody, Modal, ModalHeader, ModalBody, Input, Form, FormGroup, Label } from "reactstrap";
+import { FAQ_SUPPORT_INTRO, QUICK_QUESTIONS, matchAbiFaq } from '../utils/abiFaq.js';
 import { useNavigate } from "react-router-dom";
 import { useState, useRef } from "react";
 import { FaCheckCircle, FaStar, FaArrowRight, FaSearch, FaCalendarCheck, FaBell, FaQrcode, FaRobot, FaChartBar, FaComments, FaTimes, FaFacebook, FaTwitter, FaLinkedin, FaInstagram, FaRocket, FaPlay, FaLaptop, FaCamera, FaMicroscope, FaGraduationCap, FaUser, FaPlus, FaCode, FaFlask, FaCogs, FaBriefcase, FaPalette } from 'react-icons/fa';
@@ -13,9 +14,24 @@ const LandingPage = () => {
     const [chatMessages, setChatMessages] = useState([
         {
             type: 'bot',
-            text: 'Hello! I\'m your AI assistant. How can I help you today?'
+            text: `Hello! I'm the UTAS Borrowing Hub assistant.\n\n${FAQ_SUPPORT_INTRO}\n\nLog in for personalized help with your borrows and the live catalog.`
         }
     ]);
+
+    const sendLandingChatMessage = (rawText) => {
+        const text = String(rawText ?? chatMessage).trim();
+        if (!text) return;
+        setChatMessage('');
+        const faqReply = matchAbiFaq(text);
+        const botText =
+            faqReply ||
+            'For personalized answers (your due dates, live device lists), please log in and use the assistant from the app. You can still ask about borrowing rules, return deadlines, or availability using the topics below.';
+        setChatMessages((prev) => [
+            ...prev,
+            { type: 'user', text },
+            { type: 'bot', text: botText }
+        ]);
+    };
     const [comments, setComments] = useState([
         {
             id: 1,
@@ -766,7 +782,7 @@ const LandingPage = () => {
                                         marginBottom: '1rem',
                                         fontSize: '1.25rem'
                                     }}>
-                                        AI Chatbot
+                                        AI Chatbot — FAQ Support
                                     </h4>
                                     <p style={{
                                         color: '#666666',
@@ -774,7 +790,7 @@ const LandingPage = () => {
                                         margin: 0,
                                         fontSize: '0.95rem'
                                     }}>
-                                        Get instant assistance with our AI-powered chatbot for FAQs, borrowing advice, and deadline reminders.
+                                        The chatbot answers frequently asked questions: borrowing rules, return deadlines, and resource availability — plus reservations and payments.
                                     </p>
                                 </CardBody>
                             </Card>
@@ -1378,9 +1394,22 @@ const LandingPage = () => {
                     color: '#ffffff',
                     borderBottom: 'none'
                 }}>
-                    <FaRobot className="me-2" /> AI Assistant
+                    <FaRobot className="me-2" /> AI Assistant — FAQ Support
                 </ModalHeader>
                 <ModalBody style={{ padding: '1rem', maxHeight: '400px', overflowY: 'auto' }}>
+                    <div className="mb-2" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                        {QUICK_QUESTIONS.slice(0, 5).map((question) => (
+                            <Button
+                                key={question}
+                                size="sm"
+                                color="light"
+                                onClick={() => sendLandingChatMessage(question)}
+                                style={{ borderRadius: '999px', fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}
+                            >
+                                {question}
+                            </Button>
+                        ))}
+                    </div>
                     <div style={{ marginBottom: '1rem' }}>
                         {chatMessages.map((msg, index) => (
                             <div
@@ -1397,7 +1426,8 @@ const LandingPage = () => {
                                     background: msg.type === 'bot' ? '#f0f0f0' : 'linear-gradient(135deg, #1976d2 0%, #ff9800 100%)',
                                     color: msg.type === 'bot' ? '#333333' : '#ffffff',
                                     maxWidth: '80%',
-                                    fontSize: '0.9rem'
+                                    fontSize: '0.9rem',
+                                    whiteSpace: 'pre-wrap'
                                 }}>
                                     {msg.text}
                                 </div>
@@ -1410,47 +1440,17 @@ const LandingPage = () => {
                             placeholder="Type your message..."
                             value={chatMessage}
                             onChange={(e) => setChatMessage(e.target.value)}
-                            onKeyPress={(e) => {
-                                if (e.key === 'Enter' && chatMessage.trim()) {
-                                    const userMsg = { type: 'user', text: chatMessage };
-                                    setChatMessages([...chatMessages, userMsg]);
-                                    setChatMessage('');
-                                    
-                                    setTimeout(() => {
-                                        const botResponses = [
-                                            "I'm here to help! You can ask me about borrowing resources, checking availability, or managing your account.",
-                                            "Great question! You can search for resources using the search bar, or browse by category.",
-                                            "To borrow a resource, simply click on it and select 'Borrow'. Make sure to check the due date!",
-                                            "If you need help with reservations, I can guide you through the process. Would you like to know more?",
-                                            "You can track all your borrows in the 'My Borrows' section. Don't forget to return items on time!"
-                                        ];
-                                        const randomResponse = botResponses[Math.floor(Math.random() * botResponses.length)];
-                                        setChatMessages(prev => [...prev, { type: 'bot', text: randomResponse }]);
-                                    }, 1000);
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    sendLandingChatMessage();
                                 }
                             }}
                             style={{ flex: 1 }}
                         />
                         <Button
-                            onClick={() => {
-                                if (chatMessage.trim()) {
-                                    const userMsg = { type: 'user', text: chatMessage };
-                                    setChatMessages([...chatMessages, userMsg]);
-                                    setChatMessage('');
-                                    
-                                    setTimeout(() => {
-                                        const botResponses = [
-                                            "I'm here to help! You can ask me about borrowing resources, checking availability, or managing your account.",
-                                            "Great question! You can search for resources using the search bar, or browse by category.",
-                                            "To borrow a resource, simply click on it and select 'Borrow'. Make sure to check the due date!",
-                                            "If you need help with reservations, I can guide you through the process. Would you like to know more?",
-                                            "You can track all your borrows in the 'My Borrows' section. Don't forget to return items on time!"
-                                        ];
-                                        const randomResponse = botResponses[Math.floor(Math.random() * botResponses.length)];
-                                        setChatMessages(prev => [...prev, { type: 'bot', text: randomResponse }]);
-                                    }, 1000);
-                                }
-                            }}
+                            onClick={() => sendLandingChatMessage()}
+                            disabled={!chatMessage.trim()}
                             style={{
                                 background: 'linear-gradient(135deg, #1976d2 0%, #ff9800 100%)',
                                 border: 'none'

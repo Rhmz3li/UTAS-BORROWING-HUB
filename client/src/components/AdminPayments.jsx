@@ -70,6 +70,30 @@ const AdminPayments = () => {
     setStatusModalOpen(true);
   };
 
+  const quickConfirmCashPayment = async (payment) => {
+    if (payment.status !== 'Pending' || payment.payment_method !== 'Cash') return;
+    const name = payment.user_id?.full_name || 'the user';
+    const msg =
+      `Confirm you received ${payment.amount?.toFixed(2)} OMR in cash from ${name}?\n\n` +
+      `Only confirm after the user has paid at the hub.`;
+    if (!window.confirm(msg)) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `http://localhost:5000/admin/payments/${payment._id}/status`,
+        {
+          status: 'Completed',
+          notes: 'Cash payment confirmed by admin at hub'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Cash payment confirmed successfully');
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to confirm cash payment');
+    }
+  };
+
   const updateStatus = async (newStatus) => {
     try {
       const token = localStorage.getItem('token');
@@ -121,10 +145,10 @@ const AdminPayments = () => {
 
   /** Cancel a pending borrow/reservation deposit the user no longer needs to pay */
   const quickCancelPendingDeposit = async (payment) => {
-    if (payment.status !== 'Pending' || !['Resource', 'Reservation'].includes(payment.payment_type)) return;
+    if (payment.status !== 'Pending' || !['Resource', 'Reservation', 'Penalty'].includes(payment.payment_type)) return;
     if (
       !window.confirm(
-        'Cancel this pending deposit payment request?'
+        'Cancel this pending payment request?'
       )
     )
       return;
@@ -412,6 +436,20 @@ const AdminPayments = () => {
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {getStatusBadge(payment.status)}
+                        {payment.status === 'Pending' && payment.payment_method === 'Cash' && (
+                          <div
+                            style={{
+                              fontSize: '0.75rem',
+                              color: '#ff9800',
+                              marginTop: '0.35rem',
+                              maxWidth: '160px'
+                            }}
+                          >
+                            {payment.cash_submitted_at
+                              ? 'User reported cash — confirm after receiving payment'
+                              : 'Cash — confirm when paid at desk'}
+                          </div>
+                        )}
                       </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', fontSize: '0.85rem', color: '#555' }}>
                         {payment.payment_type || '—'}
@@ -440,20 +478,31 @@ const AdminPayments = () => {
                               Refund
                             </Button>
                           )}
-                          {payment.status === 'Pending' && ['Resource', 'Reservation'].includes(payment.payment_type) && (
+                          {payment.status === 'Pending' && payment.payment_method === 'Cash' && (
+                            <Button
+                              size="sm"
+                              onClick={() => quickConfirmCashPayment(payment)}
+                              style={{ background: '#4caf50', border: 'none' }}
+                              title="Confirm cash received at hub"
+                            >
+                              <FaCheckCircle className="me-1" />
+                              Confirm Cash
+                            </Button>
+                          )}
+                          {payment.status === 'Pending' && ['Resource', 'Reservation', 'Penalty'].includes(payment.payment_type) && (
                             <Button
                               size="sm"
                               color="warning"
                               onClick={() => quickCancelPendingDeposit(payment)}
-                              title="Cancel pending deposit request"
+                              title="Cancel pending payment request"
                             >
-                              Cancel Request
+                              Cancel
                             </Button>
                           )}
                           <Button
                             size="sm"
                             onClick={() => handleStatusChange(payment)}
-                            style={{ background: '#4caf50', border: 'none' }}
+                            style={{ background: '#1976d2', border: 'none' }}
                             title="Update Status"
                           >
                             <FaCheckCircle />
@@ -504,6 +553,24 @@ const AdminPayments = () => {
         <ModalBody>
           {selectedPayment && (
             <Row>
+              {selectedPayment.status === 'Pending' && selectedPayment.payment_method === 'Cash' && (
+                <Col md={12} className="mb-3">
+                  <Alert color="success" style={{ borderRadius: '12px' }}>
+                    <strong>Cash payment — admin confirmation required</strong>
+                    <p className="mb-0 mt-2 small">
+                      Confirm only after you have received{' '}
+                      <strong>{selectedPayment.amount?.toFixed(2)} OMR</strong> in cash from the user at the hub.
+                      {selectedPayment.cash_submitted_at && (
+                        <>
+                          <br />
+                          User reported payment on{' '}
+                          {new Date(selectedPayment.cash_submitted_at).toLocaleString()}.
+                        </>
+                      )}
+                    </p>
+                  </Alert>
+                </Col>
+              )}
               <Col md={6}>
                 <h6 style={{ fontWeight: 'bold', marginBottom: '1rem', color: '#1976d2' }}>
                   User Information
@@ -566,6 +633,17 @@ const AdminPayments = () => {
           <Button color="secondary" onClick={() => setViewModalOpen(false)}>
             Close
           </Button>
+          {selectedPayment?.status === 'Pending' && selectedPayment?.payment_method === 'Cash' && (
+            <Button
+              color="success"
+              onClick={() => {
+                setViewModalOpen(false);
+                quickConfirmCashPayment(selectedPayment);
+              }}
+            >
+              <FaCheckCircle className="me-1" /> Confirm Cash Received
+            </Button>
+          )}
           {selectedPayment?.status === 'Completed' && (
             <Button
               style={{
@@ -582,7 +660,7 @@ const AdminPayments = () => {
             </Button>
           )}
           {selectedPayment?.status === 'Pending' &&
-            ['Resource', 'Reservation'].includes(selectedPayment.payment_type) && (
+            ['Resource', 'Reservation', 'Penalty'].includes(selectedPayment.payment_type) && (
               <Button color="warning" onClick={() => {
                 setViewModalOpen(false);
                 quickCancelPendingDeposit(selectedPayment);
@@ -619,6 +697,14 @@ const AdminPayments = () => {
                 <br />
                 <strong>Method:</strong> {selectedPayment.payment_method}
               </Alert>
+              {selectedPayment.status === 'Pending' && selectedPayment.payment_method === 'Cash' && (
+                <Alert color="success" className="mt-2">
+                  <strong>Cash at hub</strong>
+                  <p className="mb-0 mt-1 small">
+                    Use <strong>Mark as Completed</strong> below only after you receive the cash from the user.
+                  </p>
+                </Alert>
+              )}
               <FormGroup>
                 <Label for="statusNotes">Notes (Optional)</Label>
                 <Input

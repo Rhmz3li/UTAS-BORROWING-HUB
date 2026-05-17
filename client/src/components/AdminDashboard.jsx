@@ -50,6 +50,20 @@ const AdminDashboard = () => {
       return;
     }
     fetchDashboardData();
+
+    const interval = setInterval(fetchDashboardData, 10000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboardData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [user, navigate]);
 
   const fetchDashboardData = async () => {
@@ -129,12 +143,13 @@ const AdminDashboard = () => {
     { name: 'Returned', value: overview?.returnedBorrows || 0, color: '#2196f3' }
   ];
 
-  // Resource Status Chart Data (Pie/Donut Chart)
+  // Resource Status Chart Data (Pie/Donut Chart) — unit counts, not resource-type rows
   const resourceStatusData = [
     { name: 'Available', value: overview?.availableResources || 0, color: '#4caf50' },
-    { name: 'Borrowed', value: overview?.activeBorrows || 0, color: '#ff9800' },
+    { name: 'Borrowed', value: (overview?.unitsOnLoan ?? overview?.activeBorrows) || 0, color: '#ff9800' },
     { name: 'Maintenance', value: overview?.maintenanceResources || 0, color: '#f44336' },
-    { name: 'Reserved', value: overview?.pendingReservations || 0, color: '#9c27b0' }
+    { name: 'Reserved', value: overview?.reservedResources || 0, color: '#9c27b0' },
+    { name: 'Lost', value: overview?.lostResources || 0, color: '#795548' }
   ];
 
   // Additional Statistics
@@ -234,7 +249,7 @@ const AdminDashboard = () => {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ 
-                        color: dashboardPalette.textSecondary, 
+                        color: isDark ? dashboardPalette.textSecondary : '#333333', 
                         fontSize: '0.875rem', 
                         margin: 0, 
                         marginBottom: '0.5rem',

@@ -95,7 +95,10 @@ export async function createAndStartScanner(elementId, onDecoded) {
   await html5QrCode.start(
     cameraId,
     getScanRegionConfig(),
-    (decodedText) => onDecoded(decodedText),
+    (decodedText, decodedResult) => {
+      const format = decodedResult?.result?.format;
+      onDecoded({ text: decodedText, format });
+    },
     () => {}
   );
 

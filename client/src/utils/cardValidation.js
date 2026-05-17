@@ -1,20 +1,49 @@
 /**
- * Card validation for Visa / Mastercard (light client-side checks).
+ * Card validation for Visa / Mastercard payments.
  */
 
-export function isMastercardBin16(digits) {
-    const d = String(digits || '').replace(/\D/g, '');
-    if (d.length !== 16) return false;
-    if (/^5[1-5]\d{14}$/.test(d)) return true;
-    const p4 = parseInt(d.slice(0, 4), 10);
-    if (/^2/.test(d) && !Number.isNaN(p4) && p4 >= 2221 && p4 <= 2720) return true;
-    return false;
+/** Max completed payments allowed per unique card number (system-wide). */
+export const MAX_CARD_NUMBER_USAGE = 3;
+
+export const CARD_HOLDER_NAME_ERROR = 'Please enter a valid card holder name.';
+export const CARD_NUMBER_INVALID_ERROR = 'Please enter a valid card number.';
+export const CARD_TYPE_MISMATCH_ERROR = 'Selected card type does not match the card number.';
+export const CARD_NUMBER_REPEAT_ERROR =
+    'Card number cannot contain the same digit more than 3 times in a row.';
+
+export function normalizeCardPanDigits(rawPan) {
+    return String(rawPan || '').replace(/\D/g, '');
 }
 
-/** Visa: exactly 16 digits, starts with 4. */
+/** Keep only letters and spaces for card holder input. */
+export function sanitizeCardHolderInput(value) {
+    return String(value || '')
+        .replace(/[^A-Za-z\s]/g, '')
+        .replace(/\s{2,}/g, ' ');
+}
+
+/** Visa: 16 digits, must start with 4. */
 export function isVisaFormat(digits) {
-    const d = String(digits || '').replace(/\D/g, '');
+    const d = normalizeCardPanDigits(digits);
     return /^4\d{15}$/.test(d);
+}
+
+/** Mastercard: 16 digits, must start with 55. */
+export function isMastercardFormat(digits) {
+    const d = normalizeCardPanDigits(digits);
+    return /^55\d{14}$/.test(d);
+}
+
+/** @deprecated Use isMastercardFormat */
+export function isMastercardBin16(digits) {
+    return isMastercardFormat(digits);
+}
+
+/** No run of 4+ identical digits (max 3 in a row). */
+export function hasExcessiveRepeatedDigits(digits) {
+    const d = normalizeCardPanDigits(digits);
+    if (!d) return false;
+    return /(\d)\1{3,}/.test(d);
 }
 
 export function maxPanDigitsForNetwork(network) {
@@ -23,61 +52,64 @@ export function maxPanDigitsForNetwork(network) {
     return 16;
 }
 
-/**
- * Guess Visa vs Mastercard from the digits entered (reduces wrong card-type vs PAN).
- * @param {string} digits — digits only
- * @returns {'Visa'|'Mastercard'|null}
- */
 export function inferCardNetworkFromPanDigits(digits) {
-    const d = String(digits || '').replace(/\D/g, '');
+    const d = normalizeCardPanDigits(digits);
     if (!d.length) return null;
-    if (d.charAt(0) === '4') return 'Visa';
-    if (d.charAt(0) === '5' && d.length >= 2) {
-        const second = parseInt(d.charAt(1), 10);
-        if (!Number.isNaN(second) && second >= 1 && second <= 5) return 'Mastercard';
-        return null;
-    }
-    if (d.charAt(0) === '2' && d.length >= 4) {
-        const p4 = parseInt(d.slice(0, 4), 10);
-        if (!Number.isNaN(p4) && p4 >= 2221 && p4 <= 2720) return 'Mastercard';
-    }
+    if (d.startsWith('4')) return 'Visa';
+    if (d.startsWith('55')) return 'Mastercard';
     return null;
 }
 
-/** When PAN is complete, prefer BIN-inferred network over a mismatched toggle. */
 export function getEffectiveCardNetwork(rawPan, selectedNetwork) {
-    const digits = String(rawPan || '').replace(/\D/g, '');
+    const digits = normalizeCardPanDigits(rawPan);
     if (digits.length !== 16) return selectedNetwork;
     return inferCardNetworkFromPanDigits(digits) || selectedNetwork;
 }
 
-/**
- * @param {string} rawPan — digits or spaced groups
- * @param {'Visa'|'Mastercard'} network
- * @returns {{ ok: true } | { ok: false, message: string }}
- */
-export function validateCardNumberForNetwork(rawPan, network) {
-    const digits = String(rawPan || '').replace(/\D/g, '');
-    if (network !== 'Visa' && network !== 'Mastercard') {
-        return { ok: false, message: 'Select Visa or Mastercard.' };
+export function validateCardHolderName(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed || trimmed.length < 2) {
+        return { ok: false, message: CARD_HOLDER_NAME_ERROR };
     }
-    const effectiveNetwork = getEffectiveCardNetwork(rawPan, network);
-    if (effectiveNetwork === 'Visa' && !isVisaFormat(digits)) {
-        return { ok: false, message: 'Visa must be exactly 16 digits and start with 4.' };
+    if (!/^[A-Za-z]+(?: [A-Za-z]+)*$/.test(trimmed)) {
+        return { ok: false, message: CARD_HOLDER_NAME_ERROR };
     }
-    if (effectiveNetwork === 'Mastercard' && !isMastercardBin16(digits)) {
-        return {
-            ok: false,
-            message: 'Mastercard must be 16 digits with a valid prefix (51–55 or 2221–2720).'
-        };
-    }
-    return { ok: true };
+    return { ok: true, value: trimmed };
 }
 
 /**
- * Visa / Mastercard use 3-digit CVV on the back.
- * @returns {{ ok: true } | { ok: false, message: string }}
+ * Full PAN validation: 16 digits, Visa starts with 4, Mastercard with 55,
+ * no digit repeated 4+ times consecutively, matches selected network.
  */
+export function validateCardNumberFull(rawPan, selectedNetwork) {
+    if (selectedNetwork !== 'Visa' && selectedNetwork !== 'Mastercard') {
+        return { ok: false, message: 'Select Visa or Mastercard.' };
+    }
+
+    const digits = normalizeCardPanDigits(rawPan);
+    if (!digits || digits.length !== 16 || !/^\d+$/.test(digits)) {
+        return { ok: false, message: CARD_NUMBER_INVALID_ERROR };
+    }
+
+    if (hasExcessiveRepeatedDigits(digits)) {
+        return { ok: false, message: CARD_NUMBER_REPEAT_ERROR };
+    }
+
+    if (selectedNetwork === 'Visa' && !isVisaFormat(digits)) {
+        return { ok: false, message: CARD_TYPE_MISMATCH_ERROR };
+    }
+    if (selectedNetwork === 'Mastercard' && !isMastercardFormat(digits)) {
+        return { ok: false, message: CARD_TYPE_MISMATCH_ERROR };
+    }
+
+    return { ok: true, digits };
+}
+
+/** @deprecated Use validateCardNumberFull */
+export function validateCardNumberForNetwork(rawPan, network) {
+    return validateCardNumberFull(rawPan, network);
+}
+
 export function validateCvvMcVisa(cvv) {
     const c = String(cvv || '').replace(/\D/g, '');
     if (c.length !== 3) {
@@ -86,9 +118,19 @@ export function validateCvvMcVisa(cvv) {
     return { ok: true };
 }
 
-/** Format PAN with spaces; trims to maxDigits. */
 export function formatPanInput(rawDigits, maxDigits) {
     const d = String(rawDigits || '').replace(/\D/g, '').slice(0, maxDigits);
     const parts = d.match(/\d{1,4}/g) || [];
     return parts.join(' ');
+}
+
+export function validateCardNumberUsageLimit(usageCount) {
+    const count = Number(usageCount) || 0;
+    if (count >= MAX_CARD_NUMBER_USAGE) {
+        return {
+            ok: false,
+            message: `This card number has already been used ${count} time(s). The same card cannot be used more than ${MAX_CARD_NUMBER_USAGE} times.`
+        };
+    }
+    return { ok: true };
 }

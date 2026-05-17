@@ -19,6 +19,10 @@ const PaymentSchema = mongoose.Schema({
     card_holder: {type: String, required: false, trim: true},
     card_expiry: {type: String, required: false, trim: true, maxlength: 5},
     card_network: {type: String, required: false, trim: true, maxlength: 40},
+    /** HMAC hash of full PAN — used to limit reuse (never store full card number). */
+    card_pan_hash: {type: String, required: false, trim: true, sparse: true},
+    /** User reported cash paid at hub; admin must mark Completed */
+    cash_submitted_at: {type: Date, required: false, default: null},
     created_at: {type: Date, required: false, default: Date.now},
     updated_at: {type: Date, required: false, default: Date.now}
 }, {
@@ -29,6 +33,7 @@ const PaymentSchema = mongoose.Schema({
 PaymentSchema.index({ user_id: 1, status: 1 });
 PaymentSchema.index({ penalty_id: 1 });
 PaymentSchema.index({ transaction_id: 1 });
+PaymentSchema.index({ card_pan_hash: 1, status: 1 });
 
 const PaymentModel = mongoose.model("Payments", PaymentSchema, "Payments");
 export default PaymentModel;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Alert, Spinner, Modal, ModalHeader, ModalBody, ModalFooter, FormGroup, Label, Input } from "reactstrap";
+import { Container, Row, Col, Card, CardBody, CardTitle, Table, Badge, Button, Alert, Spinner, Modal, ModalHeader, ModalBody, ModalFooter, FormGroup, Label, Input, FormFeedback } from "reactstrap";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import axios from 'axios';
@@ -12,8 +12,13 @@ import {
     maxPanDigitsForNetwork,
     inferCardNetworkFromPanDigits,
     getEffectiveCardNetwork,
-    validateCardNumberForNetwork,
-    validateCvvMcVisa
+    validateCardNumberFull,
+    validateCardHolderName,
+    validateCvvMcVisa,
+    normalizeCardPanDigits,
+    sanitizeCardHolderInput,
+    validateCardNumberUsageLimit,
+    MAX_CARD_NUMBER_USAGE
 } from '../utils/cardValidation';
 
 const Payments = () => {
@@ -34,6 +39,9 @@ const Payments = () => {
         cvv: '',
         transaction_id: ''
     });
+    const [cardNumberError, setCardNumberError] = useState('');
+    const [cardHolderError, setCardHolderError] = useState('');
+    const [checkingCardUsage, setCheckingCardUsage] = useState(false);
 
     useEffect(() => {
         if (!user) {
@@ -87,7 +95,63 @@ const Payments = () => {
             transaction_id: generateClientTransactionId(),
             cash_notes: ''
         });
+        setCardNumberError('');
+        setCardHolderError('');
         setPayModalOpen(true);
+    };
+
+    const fetchCardUsageStatus = async (digitsOnly, paymentId) => {
+        const token = localStorage.getItem('token');
+        if (!token || digitsOnly.length < 13) {
+            return { allowed: true, usageCount: 0, remaining: MAX_CARD_NUMBER_USAGE };
+        }
+        const response = await axios.post(
+            'http://localhost:5000/payments/check-card-usage',
+            {
+                card_number: digitsOnly,
+                exclude_payment_id: paymentId || undefined
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
+        return response.data;
+    };
+
+    const verifyCardUsageLimit = async (digitsOnly) => {
+        try {
+            setCheckingCardUsage(true);
+            const status = await fetchCardUsageStatus(digitsOnly, selectedPayment?._id);
+            const limitCheck = validateCardNumberUsageLimit(status?.usageCount ?? 0);
+            if (!limitCheck.ok) {
+                setCardNumberError(limitCheck.message);
+                return { ok: false, message: limitCheck.message };
+            }
+            setCardNumberError('');
+            return { ok: true };
+        } catch (error) {
+            console.error('Card usage check error:', error);
+            const message = 'Could not verify card usage limit. Try again.';
+            toast.error(message);
+            return { ok: false, message };
+        } finally {
+            setCheckingCardUsage(false);
+        }
+    };
+
+    const handleCardNumberBlur = async () => {
+        const digits = normalizeCardPanDigits(payData.card_number);
+        if (digits.length !== 16) return;
+        const network = payData.card_network || 'Visa';
+        const panCheck = validateCardNumberFull(payData.card_number, network);
+        if (!panCheck.ok) {
+            setCardNumberError(panCheck.message);
+            return;
+        }
+        await verifyCardUsageLimit(digits);
+    };
+
+    const handleCardHolderBlur = () => {
+        const check = validateCardHolderName(payData.card_holder);
+        setCardHolderError(check.ok ? '' : check.message);
     };
 
     const selectedCardMeta = payData.card_network ? CARD_NETWORK_META[payData.card_network] : null;
@@ -101,7 +165,7 @@ const Payments = () => {
 
         if (method === 'Cash') {
             try {
-                await axios.post(
+                const response = await axios.post(
                     url,
                     {
                         payment_method: 'Cash',
@@ -110,7 +174,10 @@ const Payments = () => {
                     },
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
-                toast.success('Cash payment recorded');
+                toast.success(
+                    response.data?.message ||
+                        'Cash payment submitted. An administrator will confirm after you pay at the hub.'
+                );
                 setPayModalOpen(false);
                 setSelectedPayment(null);
                 fetchPayments();
@@ -125,13 +192,26 @@ const Payments = () => {
             toast.error('Please select your card type');
             return;
         }
-        const panCheck = validateCardNumberForNetwork(payData.card_number, payData.card_network);
+
+        const holderCheck = validateCardHolderName(payData.card_holder);
+        if (!holderCheck.ok) {
+            setCardHolderError(holderCheck.message);
+            toast.error(holderCheck.message);
+            return;
+        }
+        setCardHolderError('');
+
+        const panCheck = validateCardNumberFull(payData.card_number, payData.card_network);
         if (!panCheck.ok) {
+            setCardNumberError(panCheck.message);
             toast.error(panCheck.message);
             return;
         }
-        if (!/^[A-Za-z][A-Za-z\s.'-]{1,}$/.test(payData.card_holder.trim())) {
-            toast.error('Please enter the card holder name as shown on the card');
+
+        const digitsOnly = panCheck.digits;
+        const usageCheck = await verifyCardUsageLimit(digitsOnly);
+        if (!usageCheck.ok) {
+            toast.error(usageCheck.message || `This card cannot be used more than ${MAX_CARD_NUMBER_USAGE} times.`);
             return;
         }
         if (!/^\d{2}\/\d{2}$/.test(payData.expiry_date || '')) {
@@ -158,7 +238,6 @@ const Payments = () => {
             return;
         }
 
-        const digitsOnly = payData.card_number.replace(/\D/g, '');
         const cardNetwork = getEffectiveCardNetwork(payData.card_number, payData.card_network);
 
         try {
@@ -171,22 +250,32 @@ const Payments = () => {
                     card_details: {
                         card_network: cardNetwork,
                         card_number: digitsOnly,
-                        card_holder: payData.card_holder.trim(),
+                        card_holder: holderCheck.value,
                         expiry_date: payData.expiry_date,
                         cvv: payData.cvv
                     }
                 },
                 { headers: { Authorization: `Bearer ${token}` } }
             );
+            const followUp =
+                selectedPayment.payment_type === 'Penalty'
+                    ? 'penalty payment'
+                    : selectedPayment.payment_type === 'Reservation'
+                        ? 'reservation request'
+                        : 'borrow request';
             toast.success(
-                `Payment completed successfully. Admin has been notified to review your ${selectedPayment.payment_type === 'Reservation' ? 'reservation request' : 'borrow request'}.`
+                `Payment completed successfully. Admin has been notified to review your ${followUp}.`
             );
             setPayModalOpen(false);
             setSelectedPayment(null);
             fetchPayments();
         } catch (error) {
             console.error('Pay deposit error:', error);
-            toast.error(error.response?.data?.message || 'Failed to complete payment');
+            const msg = error.response?.data?.message || 'Failed to complete payment';
+            if (/card.*used|more than \d+ time/i.test(msg)) {
+                setCardNumberError(msg);
+            }
+            toast.error(msg);
         }
     };
 
@@ -221,20 +310,21 @@ const Payments = () => {
 
     const getPaymentMethodBadge = (method) => {
         const colors = {
-            'Cash': '#4caf50',
-            'Card': '#1976d2',
-            'Online': '#9c27b0',
-            'Bank Transfer': '#ff9800'
+            'Cash': { bg: '#e8f5e9', color: '#2e7d32' },
+            'Card': { bg: '#e3f2fd', color: '#1565c0' },
+            'Online': { bg: '#f3e5f5', color: '#7b1fa2' },
+            'Bank Transfer': { bg: '#fff3e0', color: '#e65100' }
         };
+        const style = colors[method] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
         
         return (
             <Badge style={{
-                background: colors[method] || '#666',
-                color: '#fff',
+                background: style.bg,
+                color: style.color,
                 padding: '0.35rem 0.7rem',
                 borderRadius: '15px',
                 fontSize: '0.8rem',
-                fontWeight: '500'
+                fontWeight: '600'
             }}>
                 {method}
             </Badge>
@@ -250,8 +340,15 @@ const Payments = () => {
         .reduce((sum, p) => sum + (p.amount || 0), 0);
 
     const pendingRequiredPayments = payments.filter(
-        (p) => p.status === 'Pending' && ['Resource', 'Reservation'].includes(p.payment_type)
+        (p) => p.status === 'Pending' && ['Resource', 'Reservation', 'Penalty'].includes(p.payment_type)
     );
+
+    const getPayModalTitle = (payment) => {
+        if (!payment) return 'Complete Payment';
+        if (payment.payment_type === 'Penalty') return 'Pay Penalty';
+        if (payment.payment_type === 'Reservation') return 'Pay Security Deposit';
+        return 'Pay Security Deposit';
+    };
 
     return (
         <div style={{ marginLeft: '280px', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '2rem', transition: 'all 0.3s ease' }}>
@@ -469,15 +566,32 @@ const Payments = () => {
                                                 </span>
                                             </td>
                                             <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
-                                                {['Resource', 'Reservation'].includes(payment.payment_type) && payment.status === 'Pending' ? (
+                                                {['Resource', 'Reservation', 'Penalty'].includes(payment.payment_type) &&
+                                                payment.status === 'Pending' &&
+                                                !(payment.payment_method === 'Cash' && payment.cash_submitted_at) ? (
                                                     <Button
                                                         color="primary"
                                                         size="sm"
                                                         onClick={() => openPayModal(payment)}
                                                         style={{ fontWeight: '600', borderRadius: '8px' }}
                                                     >
-                                                        Pay Now
+                                                        {payment.payment_method === 'Cash' ? 'Submit Cash' : 'Pay Now'}
                                                     </Button>
+                                                ) : payment.status === 'Pending' &&
+                                                  payment.payment_method === 'Cash' &&
+                                                  payment.cash_submitted_at ? (
+                                                    <Badge
+                                                        style={{
+                                                            background: '#fff3e0',
+                                                            color: '#ff9800',
+                                                            padding: '0.4rem 0.75rem',
+                                                            borderRadius: '8px',
+                                                            fontSize: '0.8rem',
+                                                            fontWeight: '600'
+                                                        }}
+                                                    >
+                                                        Awaiting admin
+                                                    </Badge>
                                                 ) : (
                                                     <span style={{ color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>-</span>
                                                 )}
@@ -517,7 +631,7 @@ const Payments = () => {
                     }}
                 >
                     <span className="d-flex align-items-center gap-2 fw-semibold">
-                        <FaCreditCard /> Pay Security Deposit
+                        <FaCreditCard /> {getPayModalTitle(selectedPayment)}
                     </span>
                 </ModalHeader>
                 <ModalBody className="px-4 py-4" style={{ background: 'var(--card-bg)' }}>
@@ -545,7 +659,10 @@ const Payments = () => {
                                 <hr className="my-3 opacity-25" />
                                 <div className="small" style={{ color: 'var(--text-secondary)' }}>
                                     <strong style={{ color: 'var(--text-primary)' }}>For:</strong>{' '}
-                                    {selectedPayment.notes || 'Security deposit'}
+                                    {selectedPayment.notes ||
+                                        (selectedPayment.payment_type === 'Penalty'
+                                            ? 'Penalty payment'
+                                            : 'Security deposit')}
                                 </div>
                             </div>
 
@@ -576,7 +693,8 @@ const Payments = () => {
                                     <Alert color="success" className="rounded-3 border-0 mb-4" style={{ background: 'rgba(76, 175, 80, 0.12)', color: 'var(--text-primary)' }}>
                                         <strong>Cash payment</strong>
                                         <p className="mb-0 mt-2 small" style={{ lineHeight: 1.5 }}>
-                                            Pay the security deposit in person at the hub, then confirm here so your request can proceed.
+                                            Pay in person at the hub, then click the button below so staff are notified.
+                                            An <strong>administrator will confirm</strong> your payment in Payments Management after receiving the cash.
                                         </p>
                                         {(selectedPayment.resource_id?.location || selectedPayment.resource_id?.name) && (
                                             <p className="mt-3 mb-0 small">
@@ -631,6 +749,14 @@ const Payments = () => {
                                                                 card_network: network,
                                                                 card_number: formatPanInput(raw, max)
                                                             });
+                                                            setCardNumberError('');
+                                                            if (raw.length === 16) {
+                                                                const check = validateCardNumberFull(
+                                                                    formatPanInput(raw, max),
+                                                                    network
+                                                                );
+                                                                if (!check.ok) setCardNumberError(check.message);
+                                                            }
                                                         }}
                                                     >
                                                         {network}
@@ -641,16 +767,12 @@ const Payments = () => {
                                     </FormGroup>
                                     <FormGroup>
                                         <Label>Card number *</Label>
-                                        <small className="d-block mb-2" style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
-                                            Card type updates from the number when possible. Visa: <strong>16</strong> digits starting with{' '}
-                                            <strong>4</strong>. Mastercard: <strong>16</strong> digits, prefix <strong>51–55</strong> or{' '}
-                                            <strong>2221–2720</strong>.
-                                        </small>
                                         <Input
                                             type="text"
                                             inputMode="numeric"
                                             autoComplete="cc-number"
                                             maxLength={19}
+                                            invalid={!!cardNumberError}
                                             className="rounded-3"
                                             style={{ borderColor: 'var(--border-color)', letterSpacing: '0.08em' }}
                                             value={payData.card_number}
@@ -665,13 +787,16 @@ const Payments = () => {
                                                     card_number: formatPanInput(raw, max),
                                                     ...(inferred ? { card_network: inferred } : {})
                                                 });
+                                                setCardNumberError('');
                                             }}
+                                            onBlur={handleCardNumberBlur}
                                             placeholder={
                                                 payData.card_network === 'Mastercard'
-                                                    ? '16 digits, e.g. 51xx … or 2221–2720 …'
+                                                    ? '16 digits starting with 55'
                                                     : '16 digits starting with 4'
                                             }
                                         />
+                                        {cardNumberError && <FormFeedback className="d-block">{cardNumberError}</FormFeedback>}
                                         {selectedCardMeta && (
                                             <div className="mt-2">
                                                 <span
@@ -700,11 +825,23 @@ const Payments = () => {
                                                 <Input
                                                     type="text"
                                                     className="rounded-3"
+                                                    invalid={!!cardHolderError}
                                                     style={{ borderColor: 'var(--border-color)' }}
                                                     value={payData.card_holder}
-                                                    onChange={(e) => setPayData({ ...payData, card_holder: e.target.value })}
-                                                    placeholder="Name on card"
+                                                    onChange={(e) => {
+                                                        setPayData({
+                                                            ...payData,
+                                                            card_holder: sanitizeCardHolderInput(e.target.value)
+                                                        });
+                                                        setCardHolderError('');
+                                                    }}
+                                                    onBlur={handleCardHolderBlur}
+                                                    placeholder="Name on card (letters only)"
+                                                    autoComplete="cc-name"
                                                 />
+                                                {cardHolderError && (
+                                                    <FormFeedback className="d-block">{cardHolderError}</FormFeedback>
+                                                )}
                                             </FormGroup>
                                         </Col>
                                         <Col md={3}>
@@ -758,8 +895,17 @@ const Payments = () => {
                     <Button color="light" className="rounded-pill px-4 border" onClick={() => setPayModalOpen(false)}>
                         Cancel
                     </Button>
-                    <Button color="primary" className="rounded-pill px-4 shadow-sm" onClick={handleConfirmPayDeposit}>
-                        {selectedPayment?.payment_method === 'Cash' ? 'Confirm cash payment' : 'Pay now'}
+                    <Button
+                        color="primary"
+                        className="rounded-pill px-4 shadow-sm"
+                        onClick={handleConfirmPayDeposit}
+                        disabled={checkingCardUsage}
+                    >
+                        {checkingCardUsage
+                            ? 'Checking card…'
+                            : selectedPayment?.payment_method === 'Cash'
+                              ? 'Submit for admin confirmation'
+                              : 'Pay now'}
                     </Button>
                 </ModalFooter>
             </Modal>

@@ -209,11 +209,11 @@ const AdminUsers = () => {
 
   const getRoleColor = (role) => {
     switch(role) {
-      case 'Admin': return { bg: '#f44336', color: '#fff' };
-      case 'Assistant': return { bg: '#ff9800', color: '#fff' };
-      case 'Staff': return { bg: '#2196f3', color: '#fff' };
-      case 'Student': return { bg: '#4caf50', color: '#fff' };
-      default: return { bg: '#9e9e9e', color: '#fff' };
+      case 'Admin': return { bg: '#ffebee', color: '#c62828' };
+      case 'Assistant': return { bg: '#fff3e0', color: '#e65100' };
+      case 'Staff': return { bg: '#e3f2fd', color: '#1565c0' };
+      case 'Student': return { bg: '#e8f5e9', color: '#2e7d32' };
+      default: return { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     }
   };
 

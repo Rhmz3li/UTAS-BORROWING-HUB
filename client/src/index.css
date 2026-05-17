@@ -63,15 +63,43 @@ code {
     monospace;
 }
 
-/* Remove Bootstrap badge fill globally and keep only the text */
-.badge,
-.badge[class*="bg-"] {
+/* Bootstrap utility badges: text-only (custom inline badge styles are preserved) */
+.badge.bg-primary,
+.badge.bg-secondary,
+.badge.bg-success,
+.badge.bg-danger,
+.badge.bg-warning,
+.badge.bg-info,
+.badge.bg-light,
+.badge.bg-dark,
+.badge.text-bg-primary,
+.badge.text-bg-secondary,
+.badge.text-bg-success,
+.badge.text-bg-danger,
+.badge.text-bg-warning,
+.badge.text-bg-info,
+.badge.text-bg-light,
+.badge.text-bg-dark {
   background: transparent !important;
   background-color: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  padding: 0 !important;
 }
+
+.badge.bg-success,
+.badge.text-bg-success { color: #2e7d32 !important; }
+.badge.bg-danger,
+.badge.text-bg-danger { color: #c62828 !important; }
+.badge.bg-warning,
+.badge.text-bg-warning { color: #e65100 !important; }
+.badge.bg-info,
+.badge.text-bg-info { color: #1565c0 !important; }
+.badge.bg-primary,
+.badge.text-bg-primary { color: #1565c0 !important; }
+.badge.bg-secondary,
+.badge.text-bg-secondary { color: #546e7a !important; }
+.badge.bg-dark,
+.badge.text-bg-dark { color: #37474f !important; }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
@@ -263,6 +291,89 @@ code {
 [data-theme="dark"] .nav-pills .nav-link:hover:not(.active) {
   background-color: var(--hover-bg);
   color: var(--text-primary);
+}
+
+/* ==================== LIGHT THEME — readable text on light surfaces ==================== */
+[data-theme="light"] .card,
+[data-theme="light"] .card-body,
+[data-theme="light"] .modal-content,
+[data-theme="light"] .modal-body,
+[data-theme="light"] .modal-footer,
+[data-theme="light"] .form-control,
+[data-theme="light"] .form-select,
+[data-theme="light"] .input-group-text,
+[data-theme="light"] .list-group-item,
+[data-theme="light"] .dropdown-item,
+[data-theme="light"] .table,
+[data-theme="light"] .table td,
+[data-theme="light"] .table th,
+[data-theme="light"] label,
+[data-theme="light"] .form-label {
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .table thead th {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+[data-theme="light"] .table > :not(caption) > * > * {
+  background-color: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="light"] .table tbody tr:hover > * {
+  background-color: var(--hover-bg) !important;
+}
+
+[data-theme="light"] .text-muted {
+  color: var(--text-secondary) !important;
+}
+
+[data-theme="light"] .nav-pills .nav-link {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+[data-theme="light"] .nav-pills .nav-link.active {
+  background-color: #1976d2;
+  color: #ffffff;
+}
+
+[data-theme="light"] .nav-pills .nav-link:hover:not(.active) {
+  background-color: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* White text on plain light cards/modals → dark text */
+[data-theme="light"] .card:not([style*="gradient"]) .text-white,
+[data-theme="light"] .modal-body .text-white,
+[data-theme="light"] .card-body.text-white:not([style*="gradient"]) {
+  color: #212121 !important;
+}
+
+/* Charts */
+[data-theme="light"] .recharts-cartesian-axis-tick-value,
+[data-theme="light"] .recharts-legend-item-text,
+[data-theme="light"] .recharts-text,
+[data-theme="light"] .recharts-label {
+  fill: #212121 !important;
+  color: #212121 !important;
+}
+
+/* Highlighted table rows (light backgrounds) — dark text in any theme */
+[data-theme="dark"] .table tbody tr[style*="fff3e0"] > *,
+[data-theme="dark"] .table tbody tr[style*="fff3e0"] td,
+[data-theme="dark"] .table tbody tr[style*="fff3e0"] td *,
+[data-theme="dark"] td[style*="fff3e0"],
+[data-theme="dark"] td[style*="fff3e0"] *,
+[data-theme="dark"] span[style*="fff3e0"],
+[data-theme="dark"] span[style*="e8f5e9"],
+[data-theme="dark"] span[style*="ffebee"] {
+  color: #212121 !important;
 }
 
 /* Ensure inputs are always interactive */

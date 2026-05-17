@@ -6,7 +6,7 @@ import { fetchBorrowings } from "../redux/reducers/borrowingReducer";
 import { fetchReservations } from "../redux/reducers/reservationReducer";
 import { fetchNotifications } from "../redux/reducers/notificationReducer";
 import { fetchDevices } from "../redux/reducers/deviceReducer";
-import { FaBook, FaCalendarCheck, FaBell, FaBox, FaSearch, FaClock, FaCheckCircle, FaExclamationTriangle, FaArrowRight, FaQrcode, FaLaptop, FaMicroscope, FaTools, FaChartLine, FaPalette, FaRobot, FaTimes, FaArrowUp, FaLightbulb, FaUniversity, FaGraduationCap, FaBolt, FaStar, FaComments, FaPlus, FaBullhorn } from 'react-icons/fa';
+import { FaBook, FaCalendarCheck, FaBell, FaBox, FaSearch, FaClock, FaCheckCircle, FaExclamationTriangle, FaArrowRight, FaQrcode, FaLaptop, FaMicroscope, FaTools, FaChartLine, FaPalette, FaRobot, FaTimes, FaArrowUp, FaLightbulb, FaUniversity, FaGraduationCap, FaBolt, FaStar, FaPlus, FaBullhorn } from 'react-icons/fa';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { useTheme } from '../contexts/ThemeContext.jsx';
@@ -23,7 +23,6 @@ const Home = () => {
     
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('all');
-    const [chatbotOpen, setChatbotOpen] = useState(false);
     const [showWelcome, setShowWelcome] = useState(false);
     const [feedbackModal, setFeedbackModal] = useState(false);
     const [feedbackData, setFeedbackData] = useState({
@@ -34,63 +33,37 @@ const Home = () => {
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
     const [announcements, setAnnouncements] = useState([]);
     const [loadingAnnouncements, setLoadingAnnouncements] = useState(false);
-    const [chatMessage, setChatMessage] = useState('');
-    const [chatLoading, setChatLoading] = useState(false);
-    const [chatMessages, setChatMessages] = useState([
-        {
-            type: 'bot',
-            text: 'Welcome to FAQ Support. I am Abi — your AI Chatbot for Assistance. Ask about borrowing rules, return deadlines, resource availability, reservations, payments, and returns. Use the shortcuts below for instant answers, or type your own question.'
-        }
-    ]);
+    const [recommendations, setRecommendations] = useState([]);
+    const [recommendationsMeta, setRecommendationsMeta] = useState(null);
+    const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+    const [recommendationsModal, setRecommendationsModal] = useState(false);
+    const resourcesCount = resources.length;
 
-    const fetchAnnouncements = useCallback(async () => {
+    const fetchRecommendations = useCallback(async () => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
         try {
-            setLoadingAnnouncements(true);
-            const token = localStorage.getItem('token');
-            if (!token) return;
-            
-            const response = await axios.get('http://localhost:5000/announcements', {
+            setLoadingRecommendations(true);
+            const response = await axios.get('http://localhost:5000/resources/recommendations', {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            if (response.data.success) {
-                setAnnouncements(response.data.data || []);
+            if (response.data?.success) {
+                setRecommendations(response.data.data || []);
+                setRecommendationsMeta(response.data.meta || null);
             }
         } catch (error) {
-            console.error('Fetch announcements error:', error);
-            // Don't show error to user, just log it
+            console.error('Fetch recommendations error:', error);
         } finally {
-            setLoadingAnnouncements(false);
+            setLoadingRecommendations(false);
         }
     }, []);
 
     useEffect(() => {
-        if (!user) {
-            navigate('/login');
-            return;
-        }
-        // Redirect Admin/Assistant to admin dashboard
-        if (user.role === 'Admin' || user.role === 'Assistant') {
-            navigate('/admin/dashboard');
-            return;
-        }
-        dispatch(fetchBorrowings());
-        dispatch(fetchReservations());
-        dispatch(fetchNotifications());
-        dispatch(fetchDevices());
-        fetchAnnouncements();
-        
-        // Show welcome modal for first-time users
-        const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
-        if (!hasSeenWelcome) {
-            setShowWelcome(true);
-        }
-        }, [dispatch, user, navigate, fetchAnnouncements]);
-
-    const activeBorrows = Array.isArray(borrows) ? borrows.filter(b => b.status === 'Active').length : 0;
-    const activeReservations = Array.isArray(reservations) ? reservations.filter(r => ['Pending', 'Confirmed'].includes(r.status)).length : 0;
-    const unreadNotifications = notifications?.unreadCount || 0;
-    const availableResources = Array.isArray(resources) ? resources.filter(r => r.status === 'Available') : [];
-    const resourcesCount = availableResources.length;
+        if (!user) return;
+        fetchRecommendations();
+        const seen = localStorage.getItem('hasSeenWelcome');
+        if (!seen) setShowWelcome(true);
+    }, [user, fetchRecommendations]);
     
     const recentBorrows = Array.isArray(borrows) ? borrows.slice(0, 5) : [];
     const recentReservations = Array.isArray(reservations) ? reservations.slice(0, 5) : [];
@@ -110,6 +83,9 @@ const Home = () => {
         .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
         .slice(0, 1) : [];
 
+    const activeBorrows = Array.isArray(borrows) ? borrows.filter(b => b.status === 'Active').length : 0;
+    const activeReservations = Array.isArray(reservations) ? reservations.filter(r => r.status === 'Pending' || r.status === 'Confirmed').length : 0;
+    const unreadNotifications = Array.isArray(notifications) ? notifications.filter(n => !n.is_read).length : 0;
     const totalPenalties = 0; // TODO: Calculate from penalties
     const monthlyDigitalTransactions = 1247; // Example stat
 
@@ -168,84 +144,10 @@ const Home = () => {
         }
     };
 
-    const abiQuickQuestions = [
-        'What are the borrowing rules?',
-        'How do return deadlines work?',
-        'How do I check resource availability?',
-        'How do I borrow a device?',
-        'How do I reserve a device?',
-        'How do card payments work?',
-        'How can I return an item?',
-        'Where do I see notifications?'
-    ];
 
-    const abiQuickReplies = {
-        'What are the borrowing rules?':
-            'Borrowing rules in this hub:\n\n• Start from Resources or a resource’s detail page, choose an available item, open Borrow, accept the terms, and set the borrow/due dates as the form shows.\n• If the resource has a department set, only users whose profile department matches that resource’s department can borrow or reserve it. Admin and Assistant roles bypass this rule.\n• If a refundable security deposit is required and you choose Card, complete the payment from Payments first; the request is then ready for staff/admin review. If no card deposit is required, the request still goes through admin approval as designed.\n• You will get updates in Notifications when your request is approved or rejected.',
-        'How do return deadlines work?':
-            'Return deadlines:\n\n• Each active borrow has a due date shown in My Borrows (and in your loan details).\n• Return the physical item on or before that due date to avoid overdue status.\n• To start a return: My Borrows → your active borrow → request return. Hub staff must confirm the physical return in the system before the borrow is fully completed.\n• If you are unsure of a specific date, open My Borrows and check the due date for that resource.',
-        'How do I check resource availability?':
-            'Resource availability:\n\n• Browse the catalog under Resources; use search and filters to find items.\n• On a resource’s detail page (/resources/:id), use the availability check for a specific borrow date before you confirm a borrow — the app checks whether the item can be borrowed for that period.\n• Availability also depends on stock (available quantity) and whether the item is already on loan for overlapping dates.\n• If a resource is restricted by department, your profile department must match to borrow or reserve.',
-        'How do I borrow a device?':
-            'To borrow: open Resources, pick an available device, click Borrow, accept the terms, set the due/borrow dates as prompted, and submit. If a card deposit is required, pay from Payments first, then wait for admin approval. Otherwise follow the same approval flow without a card step.',
-        'How do I reserve a device?':
-            'To reserve: open Resources or the resource detail page, click Reserve, choose pickup and expiry dates, accept the terms, and submit. If a card deposit is required, complete it in Payments before admin review.',
-        'How do card payments work?':
-            'When you choose Card for a deposit, the system creates a payment record and you complete card payment from the Payments page. After successful payment the status becomes Paid and the admin is notified that your borrow or reservation request is ready for review.',
-        'How can I return an item?':
-            'Go to My Borrows, find the active borrow, and request return. Physical return must be confirmed by hub staff in the system before the process is fully completed.',
-        'Where do I see notifications?':
-            'Open Notifications from the sidebar. You will see approvals, rejections, payment events, returns, refunds, and other system messages. Use Notification settings for preferences where available.'
-    };
 
-    const handleSendChatMessage = async (presetMessage) => {
-        const outgoingMessage = String(presetMessage || chatMessage).trim();
-        if (!outgoingMessage || chatLoading) {
-            return;
-        }
 
-        const userMessage = { type: 'user', text: outgoingMessage };
-        setChatMessage('');
 
-        if (presetMessage && abiQuickReplies[outgoingMessage]) {
-            setChatMessages((prev) => [
-                ...prev,
-                userMessage,
-                { type: 'bot', text: abiQuickReplies[outgoingMessage] }
-            ]);
-            return;
-        }
-
-        setChatMessages((prev) => [...prev, userMessage]);
-
-        setChatLoading(true);
-
-        try {
-            const token = localStorage.getItem('token');
-            const response = await axios.post(
-                'http://localhost:5000/assistant/abi-chat',
-                { message: outgoingMessage },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const reply = response.data?.data?.reply || 'Abi could not generate a response right now.';
-            setChatMessages((prev) => [...prev, { type: 'bot', text: reply }]);
-        } catch (error) {
-            console.error('Abi chat error:', error);
-            const errText =
-                error.response?.data?.message ||
-                'Sorry, Abi could not reply right now. Check that the server is running and OPENROUTER_API_KEY or OPENAI_API_KEY is set (or Ollama if USE_OLLAMA=true), then try again.';
-            setChatMessages((prev) => [
-                ...prev,
-                {
-                    type: 'bot',
-                    text: errText
-                }
-            ]);
-        } finally {
-            setChatLoading(false);
-        }
-    };
 
     const colleges = [
         { id: 'all', name: 'All Colleges', icon: FaUniversity },
@@ -257,8 +159,8 @@ const Home = () => {
     ];
 
     const filteredResourcesByCollege = activeTab === 'all' 
-        ? availableResources 
-        : availableResources.filter(r => {
+        ? resources 
+        : resources.filter(r => {
             const collegeMap = {
                 'it': 'IT',
                 'science': 'Lab Equipment',
@@ -742,7 +644,10 @@ const Home = () => {
                             e.currentTarget.style.transform = 'translateY(0) scale(1)';
                             e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.1)';
                         }}
-                        onClick={() => navigate('/resources')}
+                        onClick={() => {
+                            fetchRecommendations();
+                            setRecommendationsModal(true);
+                        }}
                     >
                         <CardBody className="p-4">
                             <div className="d-flex align-items-center mb-3">
@@ -759,14 +664,19 @@ const Home = () => {
                                     <CardTitle tag="h5" className="mb-0" style={{ color: '#fff', fontWeight: 'bold' }}>
                                         Recommendations
                                     </CardTitle>
-                                    <small style={{ color: 'rgba(255,255,255,0.9)' }}>Based on your history</small>
+                                    <small style={{ color: 'rgba(255,255,255,0.9)' }}>
+                                        {recommendations.length > 0
+                                            ? `${recommendations.length} suggestions for you`
+                                            : 'Based on your history & department'}
+                                    </small>
                                 </div>
                             </div>
                             <Button 
                                 block 
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate('/resources');
+                                    fetchRecommendations();
+                                    setRecommendationsModal(true);
                                 }}
                                 style={{
                                     background: 'rgba(255,255,255,0.95)',
@@ -1201,24 +1111,119 @@ const Home = () => {
                 <FaPlus /> Add Your Review
             </Button>
 
-            {/* AI Chatbot for Assistance — FAQ Support */}
-            <Button
-                color="primary"
-                className="rounded-circle"
-                title="AI Chatbot for Assistance — FAQ Support (borrowing rules, returns, availability)"
-                style={{
-                    position: 'fixed',
-                    bottom: '30px',
-                    right: '30px',
-                    width: '60px',
-                    height: '60px',
-                    zIndex: 1000,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                }}
-                onClick={() => setChatbotOpen(true)}
+            {/* Resource Recommendations Modal */}
+            <Modal
+                isOpen={recommendationsModal}
+                toggle={() => setRecommendationsModal(false)}
+                size="lg"
+                centered
             >
-                <FaRobot size={24} />
-            </Button>
+                <ModalHeader
+                    toggle={() => setRecommendationsModal(false)}
+                    style={{
+                        background: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+                        color: '#fff',
+                        borderBottom: 'none'
+                    }}
+                >
+                    <FaStar className="me-2" />
+                    Resource Recommendations
+                </ModalHeader>
+                <ModalBody style={{ background: 'var(--card-bg)' }}>
+                    <p className="text-muted small mb-3">
+                        Suggested lab equipment and gadgets based on your borrowing history, academic department,
+                        college, and items frequently used on campus.
+                    </p>
+                    {recommendationsMeta?.based_on && (
+                        <Alert color="light" className="py-2 small mb-3" style={{ border: '1px solid var(--border-color)' }}>
+                            {recommendationsMeta.based_on.borrow_count > 0 && (
+                                <span className="me-2">
+                                    <strong>{recommendationsMeta.based_on.borrow_count}</strong> past borrow(s)
+                                </span>
+                            )}
+                            {recommendationsMeta.based_on.top_category && (
+                                <span className="me-2">Top category: <strong>{recommendationsMeta.based_on.top_category}</strong></span>
+                            )}
+                            {recommendationsMeta.based_on.department && (
+                                <span>Department: <strong>{recommendationsMeta.based_on.department}</strong></span>
+                            )}
+                        </Alert>
+                    )}
+                    {loadingRecommendations ? (
+                        <div className="text-center py-5">
+                            <Spinner color="success" />
+                            <p className="text-muted mt-2 mb-0">Finding suggestions for you…</p>
+                        </div>
+                    ) : recommendations.length === 0 ? (
+                        <Alert color="info" className="mb-0">
+                            No personalized suggestions right now. Browse the catalog to discover available resources.
+                        </Alert>
+                    ) : (
+                        <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                            {recommendations.map((item) => (
+                                <Card
+                                    key={item._id}
+                                    className="mb-3 border-0 shadow-sm"
+                                    style={{ borderRadius: '12px', background: 'var(--bg-tertiary)' }}
+                                >
+                                    <CardBody className="p-3">
+                                        <div className="d-flex justify-content-between align-items-start gap-2">
+                                            <div>
+                                                <h6 className="mb-1 fw-bold" style={{ color: 'var(--text-primary)' }}>
+                                                    {item.name}
+                                                </h6>
+                                                <div className="small text-muted mb-2">
+                                                    {item.category}
+                                                    {item.college ? ` · ${item.college}` : ''}
+                                                    {item.available_quantity != null
+                                                        ? ` · ${item.available_quantity} available`
+                                                        : ''}
+                                                </div>
+                                                <div className="d-flex flex-wrap gap-1">
+                                                    {(item.recommendation_reasons || []).map((reason) => (
+                                                        <Badge
+                                                            key={reason}
+                                                            color="success"
+                                                            pill
+                                                            style={{ fontSize: '0.7rem', fontWeight: 500 }}
+                                                        >
+                                                            {reason}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <Button
+                                                size="sm"
+                                                color="success"
+                                                onClick={() => {
+                                                    setRecommendationsModal(false);
+                                                    navigate(`/resources/${item._id}`);
+                                                }}
+                                            >
+                                                View
+                                            </Button>
+                                        </div>
+                                    </CardBody>
+                                </Card>
+                            ))}
+                        </div>
+                    )}
+                </ModalBody>
+                <ModalFooter style={{ background: 'var(--card-bg)' }}>
+                    <Button color="secondary" outline onClick={() => setRecommendationsModal(false)}>
+                        Close
+                    </Button>
+                    <Button
+                        color="success"
+                        onClick={() => {
+                            setRecommendationsModal(false);
+                            navigate('/resources');
+                        }}
+                    >
+                        Browse all resources
+                    </Button>
+                </ModalFooter>
+            </Modal>
 
             {/* Feedback Modal */}
             <Modal isOpen={feedbackModal} toggle={() => setFeedbackModal(false)} size="lg">
@@ -1291,88 +1296,7 @@ const Home = () => {
                 </ModalFooter>
             </Modal>
 
-            {/* Chatbot Modal */}
-            <Modal isOpen={chatbotOpen} toggle={() => setChatbotOpen(false)} size="md">
-                <ModalHeader toggle={() => setChatbotOpen(false)}>
-                    <FaRobot className="me-2" />
-                    AI Chatbot for Assistance
-                </ModalHeader>
-                <ModalBody>
-                    <div className="text-center mb-3">
-                        <FaRobot size={48} className="text-primary mb-3" />
-                        <h5 className="mb-1">Abi — FAQ Support</h5>
-                        <p className="text-muted small mb-0 px-1">
-                            The chatbot answers frequently asked questions: borrowing rules, return deadlines, resource availability, reservations, payments, and returns — using the shortcuts below or your own message.
-                        </p>
-                    </div>
-                    <div className="mb-3">
-                        <div className="small fw-semibold text-secondary mb-2">FAQ Support</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            {abiQuickQuestions.map((question) => (
-                                <Button
-                                    key={question}
-                                    size="sm"
-                                    color="light"
-                                    onClick={() => handleSendChatMessage(question)}
-                                    disabled={chatLoading}
-                                    style={{ borderRadius: '999px' }}
-                                >
-                                    {question}
-                                </Button>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="border rounded p-3 mb-3" style={{ minHeight: '260px', maxHeight: '320px', overflowY: 'auto', background: 'var(--bg-tertiary)', borderColor: 'var(--border-color)' }}>
-                        {chatMessages.map((message, index) => (
-                            <div
-                                key={`${message.type}-${index}`}
-                                style={{
-                                    display: 'flex',
-                                    justifyContent: message.type === 'user' ? 'flex-end' : 'flex-start',
-                                    marginBottom: '0.75rem'
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        maxWidth: '85%',
-                                        padding: '0.7rem 0.95rem',
-                                        borderRadius: '14px',
-                                        background: message.type === 'user' ? '#1976d2' : 'var(--card-bg)',
-                                        color: message.type === 'user' ? '#fff' : 'var(--text-primary)',
-                                        border: message.type === 'user' ? 'none' : '1px solid var(--border-color)',
-                                        whiteSpace: 'pre-wrap',
-                                        lineHeight: 1.5
-                                    }}
-                                >
-                                    {message.text}
-                                </div>
-                            </div>
-                        ))}
-                        {chatLoading && (
-                            <div className="d-flex align-items-center gap-2 text-muted small">
-                                <Spinner size="sm" />
-                                Abi is answering…
-                            </div>
-                        )}
-                    </div>
-                    <InputGroup>
-                        <Input
-                            placeholder="Ask about borrowing rules, return deadlines, or availability…"
-                            value={chatMessage}
-                            onChange={(e) => setChatMessage(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleSendChatMessage();
-                                }
-                            }}
-                        />
-                        <Button color="primary" onClick={() => handleSendChatMessage()} disabled={chatLoading || !chatMessage.trim()}>
-                            <FaComments />
-                        </Button>
-                    </InputGroup>
-                </ModalBody>
-            </Modal>
+
             </Container>
         </div>
     );

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { createAndStartScanner, normalizeScanCode, shouldAcceptScan } from '../utils/scannerUtils';
+import { Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
 const SCANNER_DIV_ID = 'scan-update-status-scanner';
 const API_BASE = 'http://localhost:5000';
@@ -64,7 +65,7 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
     if (step !== 'scan') return;
     let cancelled = false;
 
-    const processCode = async (rawCode) => {
+    const processCode = async (rawCode, scanFormat) => {
       const code = normalizeScanCode(rawCode);
       if (!code || processingScanRef.current) return;
       if (!shouldAcceptScan(lastScanRef, code)) return;
@@ -90,14 +91,20 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
           setError(null);
         } else {
           toggleRef.current();
-          navigateRef.current('/admin/resources', { state: { openAddFromScan: code } });
-          toast.info('Code not found. Opening add device form.');
+          const isQR = scanFormat === Html5QrcodeSupportedFormats.QR_CODE;
+          navigateRef.current('/admin/resources', {
+            state: isQR ? { openAddWithQRCode: code } : { openAddWithBarcode: code },
+          });
+          toast.info(isQR ? 'QR code not found. Opening add form with QR filled.' : 'Barcode not found. Opening add form with barcode filled.');
         }
       } catch (err) {
         if (err.response?.status === 404) {
           toggleRef.current();
-          navigateRef.current('/admin/resources', { state: { openAddFromScan: code } });
-          toast.info('Code not found. Opening add device form.');
+          const isQR = scanFormat === Html5QrcodeSupportedFormats.QR_CODE;
+          navigateRef.current('/admin/resources', {
+            state: isQR ? { openAddWithQRCode: code } : { openAddWithBarcode: code },
+          });
+          toast.info(isQR ? 'QR code not found. Opening add form with QR filled.' : 'Barcode not found. Opening add form with barcode filled.');
         } else {
           toast.error(err.response?.data?.message || 'Scan failed. Please try again.');
           processingScanRef.current = false;
@@ -111,8 +118,8 @@ const ScanAndUpdateStatus = ({ isOpen, toggle }) => {
       setError(null);
       try {
         if (cancelled || scannerRef.current) return;
-        const html5QrCode = await createAndStartScanner(SCANNER_DIV_ID, (decoded) => {
-          if (!cancelled) processCode(decoded);
+        const html5QrCode = await createAndStartScanner(SCANNER_DIV_ID, ({ text, format }) => {
+          if (!cancelled) processCode(text, format);
         });
         if (cancelled) {
           await html5QrCode.stop().catch(() => {});

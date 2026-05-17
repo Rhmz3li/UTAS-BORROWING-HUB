@@ -965,6 +965,7 @@ const ResourceDetail = () => {
                     fontSize: '0.9rem', 
                     padding: '0.6rem 1.2rem',
                     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: '#ffffff',
                     border: 'none',
                     borderRadius: '25px',
                     fontWeight: '600'
@@ -978,6 +979,7 @@ const ResourceDetail = () => {
                       background: resource.status === 'Available' 
                         ? 'linear-gradient(135deg, #4caf50 0%, #45a049 100%)'
                         : 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)',
+                      color: '#ffffff',
                       border: 'none',
                       borderRadius: '25px',
                       fontWeight: '600'

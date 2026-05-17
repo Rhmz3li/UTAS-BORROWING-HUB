@@ -23,6 +23,7 @@ import AdminPenalties from './components/AdminPenalties.jsx';
 import AdminReports from './components/AdminReports.jsx';
 import NotificationSettings from './components/NotificationSettings.jsx';
 import NotificationSoundPrompt from './components/NotificationSoundPrompt.jsx';
+import Chatbot from './components/Chatbot.jsx';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Container, Row, Col } from 'reactstrap';
 import Header from './components/Header.jsx';
@@ -52,6 +53,7 @@ function App() {
     return (
         <>
             <NotificationSoundPrompt />
+            <Chatbot />
             <Routes>
                 {/* Public Routes */}
                 <Route path="/" element={<LandingPage />} />

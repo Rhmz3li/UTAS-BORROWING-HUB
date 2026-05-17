@@ -1,4 +1,4 @@
-import { Container, Row, Col, Card, CardBody, Button, Input, InputGroup, InputGroupText, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Badge, Table, Alert, Spinner } from 'reactstrap';
+import { Container, Row, Col, Card, CardBody, Button, Input, InputGroup, InputGroupText, Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Label, Badge, Table, Alert, Spinner, FormFeedback } from 'reactstrap';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -22,7 +22,193 @@ const AdminResources = () => {
   const [collegeStats, setCollegeStats] = useState({});
   const [availableCategories, setAvailableCategories] = useState(['IT', 'Electronics', 'Lab Equipment', 'Books', 'Media', 'Other']);
   const [generatingCodes, setGeneratingCodes] = useState(false);
+  const [validatingCodes, setValidatingCodes] = useState(false);
   const [identifiersLocked, setIdentifiersLocked] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
+
+  const VALID_COLLEGES = [
+    'General',
+    'Information Technology',
+    'Science',
+    'Engineering',
+    'Business Studies',
+    'Creative Industries'
+  ];
+  const VALID_STATUSES = ['Available', 'Borrowed', 'Reserved', 'Maintenance', 'Lost'];
+  const VALID_CONDITIONS = ['Excellent', 'Good', 'Fair', 'Poor'];
+
+  const clearFieldError = (field) => {
+    setFormErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  /** Letters, numbers, hyphen, underscore; 3–64 chars (e.g. UBH-ABC123XY). */
+  const IDENTIFIER_CODE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
+
+  const validateBarcodeQrFields = (barcodeRaw, qrRaw) => {
+    const errors = {};
+    const barcode = String(barcodeRaw || '').trim();
+    const qrCode = String(qrRaw || '').trim();
+
+    const checkSingle = (value, label, key) => {
+      if (!value) return;
+      if (/\s/.test(value)) {
+        errors[key] = `${label} cannot contain spaces.`;
+        return;
+      }
+      if (value.length < 3) {
+        errors[key] = `${label} must be at least 3 characters.`;
+        return;
+      }
+      if (value.length > 64) {
+        errors[key] = `${label} must be 64 characters or less.`;
+        return;
+      }
+      if (!IDENTIFIER_CODE_RE.test(value)) {
+        errors[key] = `${label}: use letters, numbers, hyphens, and underscores only (e.g. UBH-ABC123XY).`;
+      }
+    };
+
+    checkSingle(barcode, 'Barcode', 'barcode');
+    checkSingle(qrCode, 'QR code', 'qr_code');
+
+    if (!errors.barcode && !errors.qr_code && (barcode || qrCode)) {
+      if (barcode && !qrCode) {
+        errors.qr_code = 'QR code is required and must match the barcode.';
+      } else if (qrCode && !barcode) {
+        errors.barcode = 'Barcode is required and must match the QR code.';
+      } else if (barcode !== qrCode) {
+        errors.barcode = 'Barcode and QR code must be the same value.';
+        errors.qr_code = 'Barcode and QR code must be the same value.';
+      }
+    }
+
+    return errors;
+  };
+
+  const applyIdentifierValidation = () => {
+    const idErrors = validateBarcodeQrFields(formData.barcode, formData.qr_code);
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next.barcode;
+      delete next.qr_code;
+      return { ...next, ...idErrors };
+    });
+  };
+
+  const verifyIdentifierNotInUse = async (code, resourceId) => {
+    const trimmed = String(code || '').trim();
+    if (!trimmed) return null;
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    try {
+      const res = await axios.get(
+        `http://localhost:5000/resources/scan/${encodeURIComponent(trimmed)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const existing = res.data?.data;
+      if (existing && (!resourceId || String(existing._id) !== String(resourceId))) {
+        const label = existing.name ? `"${existing.name}"` : 'another resource';
+        return `This code is already used by ${label}. Use Generate or enter a different code.`;
+      }
+    } catch (err) {
+      if (err.response?.status === 404) return null;
+      throw err;
+    }
+    return null;
+  };
+
+  const validateResourceForm = () => {
+    const errors = {};
+    const name = String(formData.name || '').trim();
+    if (!name) errors.name = 'Resource name is required.';
+    else if (name.length < 2) errors.name = 'Name must be at least 2 characters.';
+    else if (name.length > 200) errors.name = 'Name must be 200 characters or less.';
+
+    const category = String(formData.category || '').trim();
+    if (!category) errors.category = 'Category is required.';
+    else if (category.length > 100) errors.category = 'Category is too long (max 100 characters).';
+
+    if (!formData.college || !VALID_COLLEGES.includes(formData.college)) {
+      errors.college = 'Please select a college.';
+    }
+
+    if (!VALID_STATUSES.includes(formData.status)) {
+      errors.status = 'Please select a valid status.';
+    }
+
+    if (formData.condition && !VALID_CONDITIONS.includes(formData.condition)) {
+      errors.condition = 'Please select a valid condition.';
+    }
+
+    const description = String(formData.description || '');
+    if (description.length > 2000) {
+      errors.description = 'Description is too long (max 2000 characters).';
+    }
+
+    const totalQty = Number(formData.total_quantity);
+    if (!Number.isFinite(totalQty) || !Number.isInteger(totalQty) || totalQty < 1) {
+      errors.total_quantity = 'Total quantity must be a whole number of at least 1.';
+    }
+
+    const availQty = Number(formData.available_quantity);
+    if (!Number.isFinite(availQty) || !Number.isInteger(availQty) || availQty < 0) {
+      errors.available_quantity = 'Available quantity must be a whole number of 0 or more.';
+    } else if (
+      Number.isFinite(totalQty) &&
+      Number.isInteger(totalQty) &&
+      totalQty >= 1 &&
+      availQty > totalQty
+    ) {
+      errors.available_quantity = 'Available quantity cannot be greater than total quantity.';
+    }
+
+    const maxDays = Number(formData.max_borrow_days);
+    if (!Number.isFinite(maxDays) || !Number.isInteger(maxDays) || maxDays < 1) {
+      errors.max_borrow_days = 'Max borrow days must be at least 1.';
+    } else if (maxDays > 365) {
+      errors.max_borrow_days = 'Max borrow days cannot exceed 365.';
+    }
+
+    if (formData.requires_payment) {
+      const amt = Number(formData.payment_amount);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        errors.payment_amount = 'Enter a security deposit greater than 0 OMR.';
+      } else if (amt > 10) {
+        errors.payment_amount = 'Security deposit cannot exceed 10 OMR.';
+      }
+    }
+
+    const location = String(formData.location || '').trim();
+    if (location.length > 200) {
+      errors.location = 'Location is too long (max 200 characters).';
+    }
+
+    const image = String(formData.image || '').trim();
+    if (image) {
+      try {
+        const parsed = new URL(image);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          errors.image = 'Image URL must use http:// or https://';
+        }
+      } catch {
+        errors.image = 'Enter a valid URL (e.g. https://example.com/image.jpg).';
+      }
+    }
+
+    Object.assign(errors, validateBarcodeQrFields(formData.barcode, formData.qr_code));
+
+    return errors;
+  };
+
+  const closeResourceModal = () => {
+    setModalOpen(false);
+    setFormErrors({});
+  };
   
   // Modal states
   const [modalOpen, setModalOpen] = useState(false);
@@ -54,15 +240,15 @@ const AdminResources = () => {
     fetchAvailableCategories();
   }, [currentPage, searchTerm, selectedCategory, selectedCollege, selectedStatus]);
 
-  // Open Add New Resource when scan finds no device (barcode or QR — same value in both fields)
+  // Open Add New Resource when scan finds no device
   useEffect(() => {
-    const scanned =
-      location.state?.openAddFromScan != null && location.state?.openAddFromScan !== ''
-        ? String(location.state.openAddFromScan).trim()
-        : location.state?.openAddWithBarcode != null && location.state?.openAddWithBarcode !== ''
-          ? String(location.state.openAddWithBarcode).trim()
+    const scannedBarcode =
+      location.state?.openAddWithBarcode != null && location.state?.openAddWithBarcode !== ''
+        ? String(location.state.openAddWithBarcode).trim()
+        : location.state?.openAddFromScan != null && location.state?.openAddFromScan !== ''
+          ? String(location.state.openAddFromScan).trim()
           : '';
-    if (!scanned) return;
+    if (!scannedBarcode) return;
     navigate(location.pathname, { replace: true, state: {} });
     setSelectedResource(null);
     setIdentifiersLocked(false);
@@ -78,14 +264,46 @@ const AdminResources = () => {
       max_borrow_days: 7,
       total_quantity: 1,
       available_quantity: 1,
-      barcode: scanned,
-      qr_code: scanned,
+      barcode: scannedBarcode,
+      qr_code: '',
       image: '',
       requires_payment: false,
       payment_amount: 0
     });
     setModalOpen(true);
-    toast.info(`Code "${scanned}" not found. Barcode and QR are filled — complete the form and save.`);
+    toast.info(`Barcode "${scannedBarcode}" filled from scan. Enter QR code separately if needed.`);
+  }, [location.state, location.pathname, navigate]);
+
+  // Open Add New Resource when QR code scan finds no device — fill only qr_code field
+  useEffect(() => {
+    const scannedQR =
+      location.state?.openAddWithQRCode != null && location.state?.openAddWithQRCode !== ''
+        ? String(location.state.openAddWithQRCode).trim()
+        : '';
+    if (!scannedQR) return;
+    navigate(location.pathname, { replace: true, state: {} });
+    setSelectedResource(null);
+    setIdentifiersLocked(false);
+    setFormData({
+      name: '',
+      description: '',
+      category: 'IT',
+      college: 'General',
+      department: '',
+      status: 'Available',
+      location: '',
+      condition: 'Good',
+      max_borrow_days: 7,
+      total_quantity: 1,
+      available_quantity: 1,
+      barcode: '',
+      qr_code: scannedQR,
+      image: '',
+      requires_payment: false,
+      payment_amount: 0
+    });
+    setModalOpen(true);
+    toast.info(`QR code "${scannedQR}" filled from scan. Enter barcode separately if needed.`);
   }, [location.state, location.pathname, navigate]);
 
   // Open edit modal when arriving from scan (View Details / Edit Resource)
@@ -226,11 +444,13 @@ const AdminResources = () => {
   const handleAddNew = () => {
     setSelectedResource(null);
     setIdentifiersLocked(false);
+    setFormErrors({});
     setFormData({
       name: '',
       description: '',
       category: 'IT',
       college: 'General',
+      department: '',
       status: 'Available',
       location: '',
       condition: 'Good',
@@ -262,6 +482,7 @@ const AdminResources = () => {
       }
     }
     setIdentifiersLocked(locked);
+    setFormErrors({});
     setSelectedResource(resource);
     setFormData({
       name: resource.name || '',
@@ -359,23 +580,59 @@ const AdminResources = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const b = (formData.barcode || '').trim();
-    const q = (formData.qr_code || '').trim();
-    if ((b || q) && b !== q) {
-      toast.error('Barcode and QR code must match exactly (or leave both empty).');
+    const errors = validateResourceForm();
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      toast.error('Please fix the highlighted fields before saving.');
       return;
     }
+    setFormErrors({});
+
+    const payload = {
+      ...formData,
+      name: String(formData.name || '').trim(),
+      category: String(formData.category || '').trim(),
+      description: String(formData.description || '').trim(),
+      location: String(formData.location || '').trim(),
+      image: String(formData.image || '').trim(),
+      barcode: String(formData.barcode || '').trim(),
+      qr_code: String(formData.qr_code || '').trim(),
+      department: formData.department || '',
+      total_quantity: Number(formData.total_quantity),
+      available_quantity: Number(formData.available_quantity),
+      max_borrow_days: Number(formData.max_borrow_days),
+      payment_amount: formData.requires_payment ? Number(formData.payment_amount) : 0
+    };
+
+    if (payload.barcode) {
+      setValidatingCodes(true);
+      try {
+        const duplicateMsg = await verifyIdentifierNotInUse(payload.barcode, selectedResource?._id);
+        if (duplicateMsg) {
+          setFormErrors({ barcode: duplicateMsg, qr_code: duplicateMsg });
+          toast.error(duplicateMsg);
+          return;
+        }
+      } catch (checkErr) {
+        console.error('Code uniqueness check failed:', checkErr);
+        toast.error('Could not verify barcode/QR uniqueness. Try again.');
+        return;
+      } finally {
+        setValidatingCodes(false);
+      }
+    }
+
     try {
       const token = localStorage.getItem('token');
       
       // Add new category to available categories if it doesn't exist
-      if (formData.category && !availableCategories.includes(formData.category.trim())) {
-        setAvailableCategories([...availableCategories, formData.category.trim()].sort());
+      if (payload.category && !availableCategories.includes(payload.category)) {
+        setAvailableCategories([...availableCategories, payload.category].sort());
       }
       
       if (selectedResource) {
         // Update
-        await axios.put(`http://localhost:5000/resources/${selectedResource._id}`, formData, {
+        await axios.put(`http://localhost:5000/resources/${selectedResource._id}`, payload, {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -383,7 +640,7 @@ const AdminResources = () => {
         toast.success('Resource updated successfully');
       } else {
         // Create
-        await axios.post('http://localhost:5000/resources', formData, {
+        await axios.post('http://localhost:5000/resources', payload, {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -391,14 +648,18 @@ const AdminResources = () => {
         toast.success('Resource created successfully');
       }
       
-      setModalOpen(false);
+      closeResourceModal();
       setSelectedResource(null);
       fetchResources();
       fetchCollegeStats();
       fetchAvailableCategories(); // Refresh categories after adding/updating resource
     } catch (error) {
       console.error('Submit error:', error);
-      toast.error(error.response?.data?.message || 'Failed to save resource');
+      const msg = error.response?.data?.message || 'Failed to save resource';
+      if (/barcode|qr\s*code|qr_code/i.test(msg)) {
+        setFormErrors((prev) => ({ ...prev, barcode: msg, qr_code: msg }));
+      }
+      toast.error(msg);
     }
   };
 
@@ -748,6 +1009,19 @@ const AdminResources = () => {
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                           <Button
                             size="sm"
+                            onClick={() => handleView(resource)}
+                            style={{
+                              background: '#0288d1',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '0.4rem 0.8rem'
+                            }}
+                            title="View details (read only)"
+                          >
+                            <FaEye style={{ fontSize: '0.85rem' }} />
+                          </Button>
+                          <Button
+                            size="sm"
                             onClick={() => handleEdit(resource)}
                             style={{ 
                               background: '#1976d2', 
@@ -811,12 +1085,17 @@ const AdminResources = () => {
       )}
 
       {/* Add/Edit Modal */}
-      <Modal isOpen={modalOpen} toggle={() => setModalOpen(false)} size="lg">
-        <ModalHeader toggle={() => setModalOpen(false)}>
+      <Modal isOpen={modalOpen} toggle={closeResourceModal} size="lg">
+        <ModalHeader toggle={closeResourceModal}>
           {selectedResource ? 'Edit Resource' : 'Add New Resource'}
         </ModalHeader>
         <Form onSubmit={handleSubmit}>
           <ModalBody>
+            {Object.keys(formErrors).length > 0 && (
+              <Alert color="danger" className="py-2 small">
+                Please correct the highlighted fields below before {selectedResource ? 'updating' : 'creating'} the resource.
+              </Alert>
+            )}
             <Row>
               <Col md={6}>
                 <FormGroup>
@@ -824,9 +1103,13 @@ const AdminResources = () => {
                   <Input
                     type="text"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
+                    invalid={!!formErrors.name}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      clearFieldError('name');
+                    }}
                   />
+                  {formErrors.name && <FormFeedback>{formErrors.name}</FormFeedback>}
                 </FormGroup>
               </Col>
               <Col md={6}>
@@ -837,9 +1120,12 @@ const AdminResources = () => {
                       type="text"
                       list="category-list"
                       value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      invalid={!!formErrors.category}
+                      onChange={(e) => {
+                        setFormData({ ...formData, category: e.target.value });
+                        clearFieldError('category');
+                      }}
                       placeholder="Type or select a category..."
-                      required
                       style={{
                         paddingRight: '2.5rem'
                       }}
@@ -861,7 +1147,8 @@ const AdminResources = () => {
                       <FaBox />
                     </div>
                   </div>
-                  {formData.category && !availableCategories.includes(formData.category) && (
+                  {formErrors.category && <FormFeedback className="d-block">{formErrors.category}</FormFeedback>}
+                  {formData.category && !availableCategories.includes(formData.category) && !formErrors.category && (
                     <small style={{ color: '#1976d2', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
                       ✓ New category will be added: "{formData.category}"
                     </small>
@@ -872,8 +1159,11 @@ const AdminResources = () => {
                   <Input
                     type="select"
                     value={formData.college}
-                    onChange={(e) => setFormData({ ...formData, college: e.target.value })}
-                    required
+                    invalid={!!formErrors.college}
+                    onChange={(e) => {
+                      setFormData({ ...formData, college: e.target.value });
+                      clearFieldError('college');
+                    }}
                   >
                     <option value="General">General</option>
                     <option value="Information Technology">Information Technology</option>
@@ -882,6 +1172,7 @@ const AdminResources = () => {
                     <option value="Business Studies">Business Studies</option>
                     <option value="Creative Industries">Creative Industries</option>
                   </Input>
+                  {formErrors.college && <FormFeedback>{formErrors.college}</FormFeedback>}
                 </FormGroup>
               </Col>
             </Row>
@@ -906,8 +1197,13 @@ const AdminResources = () => {
                 type="textarea"
                 rows="3"
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                invalid={!!formErrors.description}
+                onChange={(e) => {
+                  setFormData({ ...formData, description: e.target.value });
+                  clearFieldError('description');
+                }}
               />
+              {formErrors.description && <FormFeedback>{formErrors.description}</FormFeedback>}
             </FormGroup>
             <Row>
               <Col md={6}>
@@ -916,8 +1212,11 @@ const AdminResources = () => {
                   <Input
                     type="select"
                     value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    required
+                    invalid={!!formErrors.status}
+                    onChange={(e) => {
+                      setFormData({ ...formData, status: e.target.value });
+                      clearFieldError('status');
+                    }}
                   >
                     <option value="Available">Available</option>
                     <option value="Borrowed">Borrowed</option>
@@ -925,6 +1224,7 @@ const AdminResources = () => {
                     <option value="Maintenance">Maintenance</option>
                     <option value="Lost">Lost</option>
                   </Input>
+                  {formErrors.status && <FormFeedback>{formErrors.status}</FormFeedback>}
                 </FormGroup>
               </Col>
               <Col md={6}>
@@ -933,13 +1233,18 @@ const AdminResources = () => {
                   <Input
                     type="select"
                     value={formData.condition}
-                    onChange={(e) => setFormData({ ...formData, condition: e.target.value })}
+                    invalid={!!formErrors.condition}
+                    onChange={(e) => {
+                      setFormData({ ...formData, condition: e.target.value });
+                      clearFieldError('condition');
+                    }}
                   >
                     <option value="Excellent">Excellent</option>
                     <option value="Good">Good</option>
                     <option value="Fair">Fair</option>
                     <option value="Poor">Poor</option>
                   </Input>
+                  {formErrors.condition && <FormFeedback>{formErrors.condition}</FormFeedback>}
                 </FormGroup>
               </Col>
             </Row>
@@ -950,17 +1255,22 @@ const AdminResources = () => {
                   <Input
                     type="number"
                     min="1"
+                    step="1"
                     value={formData.total_quantity}
+                    invalid={!!formErrors.total_quantity}
                     onChange={(e) => {
-                      const val = parseInt(e.target.value) || 1;
-                      setFormData({ 
-                        ...formData, 
-                        total_quantity: val,
-                        available_quantity: Math.min(formData.available_quantity, val)
+                      const val = parseInt(e.target.value, 10);
+                      const total = Number.isFinite(val) && val >= 1 ? val : 1;
+                      setFormData({
+                        ...formData,
+                        total_quantity: total,
+                        available_quantity: Math.min(formData.available_quantity, total)
                       });
+                      clearFieldError('total_quantity');
+                      clearFieldError('available_quantity');
                     }}
-                    required
                   />
+                  {formErrors.total_quantity && <FormFeedback>{formErrors.total_quantity}</FormFeedback>}
                 </FormGroup>
               </Col>
               <Col md={4}>
@@ -969,11 +1279,20 @@ const AdminResources = () => {
                   <Input
                     type="number"
                     min="0"
+                    step="1"
                     max={formData.total_quantity}
                     value={formData.available_quantity}
-                    onChange={(e) => setFormData({ ...formData, available_quantity: parseInt(e.target.value) || 0 })}
-                    required
+                    invalid={!!formErrors.available_quantity}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setFormData({
+                        ...formData,
+                        available_quantity: Number.isFinite(val) && val >= 0 ? val : 0
+                      });
+                      clearFieldError('available_quantity');
+                    }}
                   />
+                  {formErrors.available_quantity && <FormFeedback>{formErrors.available_quantity}</FormFeedback>}
                 </FormGroup>
               </Col>
               <Col md={4}>
@@ -982,9 +1301,20 @@ const AdminResources = () => {
                   <Input
                     type="number"
                     min="1"
+                    max="365"
+                    step="1"
                     value={formData.max_borrow_days}
-                    onChange={(e) => setFormData({ ...formData, max_borrow_days: parseInt(e.target.value) || 7 })}
+                    invalid={!!formErrors.max_borrow_days}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setFormData({
+                        ...formData,
+                        max_borrow_days: Number.isFinite(val) && val >= 1 ? val : 1
+                      });
+                      clearFieldError('max_borrow_days');
+                    }}
                   />
+                  {formErrors.max_borrow_days && <FormFeedback>{formErrors.max_borrow_days}</FormFeedback>}
                 </FormGroup>
               </Col>
             </Row>
@@ -1022,15 +1352,17 @@ const AdminResources = () => {
                       max="10"
                       step="0.1"
                       value={formData.payment_amount}
+                      invalid={!!formErrors.payment_amount}
                       onChange={(e) => {
                         let val = parseFloat(e.target.value);
                         if (Number.isNaN(val)) val = 0;
                         if (val < 0) val = 0;
                         if (val > 10) val = 10;
                         setFormData({ ...formData, payment_amount: val });
+                        clearFieldError('payment_amount');
                       }}
-                      required
                     />
+                    {formErrors.payment_amount && <FormFeedback>{formErrors.payment_amount}</FormFeedback>}
                     <small className="text-muted">
                       This amount (up to 10 OMR) will be held as a security deposit and can be used to cover penalties.
                     </small>
@@ -1045,19 +1377,29 @@ const AdminResources = () => {
                   <Input
                     type="text"
                     value={formData.location}
-                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    invalid={!!formErrors.location}
+                    onChange={(e) => {
+                      setFormData({ ...formData, location: e.target.value });
+                      clearFieldError('location');
+                    }}
                   />
+                  {formErrors.location && <FormFeedback>{formErrors.location}</FormFeedback>}
                 </FormGroup>
               </Col>
               <Col md={6}>
                 <FormGroup>
                   <Label>Image URL</Label>
                   <Input
-                    type="text"
+                    type="url"
                     value={formData.image}
-                    onChange={(e) => setFormData({ ...formData, image: e.target.value })}
+                    invalid={!!formErrors.image}
+                    onChange={(e) => {
+                      setFormData({ ...formData, image: e.target.value });
+                      clearFieldError('image');
+                    }}
                     placeholder="https://example.com/image.jpg"
                   />
+                  {formErrors.image && <FormFeedback>{formErrors.image}</FormFeedback>}
                 </FormGroup>
               </Col>
             </Row>
@@ -1085,11 +1427,30 @@ const AdminResources = () => {
                   <Input
                     type="text"
                     value={formData.barcode}
-                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                    invalid={!!formErrors.barcode}
+                    maxLength={64}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\s/g, '');
+                      const syncIdentifiers = !(identifiersLocked && selectedResource);
+                      setFormData({
+                        ...formData,
+                        barcode: v,
+                        ...(syncIdentifiers ? { qr_code: v } : {})
+                      });
+                      clearFieldError('barcode');
+                      clearFieldError('qr_code');
+                    }}
+                    onBlur={applyIdentifierValidation}
                     disabled={identifiersLocked && !!selectedResource}
                     style={!selectedResource && formData.barcode ? { borderColor: '#1565c0', background: '#e8f0fe' } : {}}
-                    placeholder="Scan or enter barcode"
+                    placeholder="e.g. UBH-ABC123XY (3–64 chars)"
                   />
+                  {formErrors.barcode && <FormFeedback>{formErrors.barcode}</FormFeedback>}
+                  {!formErrors.barcode && (
+                    <small className="text-muted d-block">Letters, numbers, hyphen, underscore. Must match QR code.</small>
+                  )}
                 </FormGroup>
               </Col>
               <Col md={6}>
@@ -1098,15 +1459,30 @@ const AdminResources = () => {
                   <Input
                     type="text"
                     value={formData.qr_code}
-                    onChange={(e) => setFormData({ ...formData, qr_code: e.target.value })}
+                    invalid={!!formErrors.qr_code}
+                    maxLength={64}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\s/g, '');
+                      const syncIdentifiers = !(identifiersLocked && selectedResource);
+                      setFormData({
+                        ...formData,
+                        qr_code: v,
+                        ...(syncIdentifiers ? { barcode: v } : {})
+                      });
+                      clearFieldError('barcode');
+                      clearFieldError('qr_code');
+                    }}
+                    onBlur={applyIdentifierValidation}
                     disabled={identifiersLocked && !!selectedResource}
+                    placeholder="Same value as barcode"
                   />
+                  {formErrors.qr_code && <FormFeedback>{formErrors.qr_code}</FormFeedback>}
+                  {!formErrors.qr_code && (
+                    <small className="text-muted d-block">Must be identical to barcode for scanning.</small>
+                  )}
                 </FormGroup>
-              </Col>
-            </Row>
-            <Row>
-              <Col md={12}>
-                <p className="small text-muted mb-2">Barcode and QR code must match exactly before you save.</p>
               </Col>
             </Row>
             <Row>
@@ -1130,11 +1506,23 @@ const AdminResources = () => {
             </Row>
           </ModalBody>
           <ModalFooter>
-            <Button type="button" color="secondary" onClick={() => setModalOpen(false)}>
+            <Button type="button" color="secondary" onClick={closeResourceModal}>
               Cancel
             </Button>
-            <Button type="submit" style={{ background: 'linear-gradient(135deg, #1976d2 0%, #ff9800 100%)', border: 'none' }}>
-              {selectedResource ? 'Update' : 'Create'}
+            <Button
+              type="submit"
+              disabled={validatingCodes}
+              style={{ background: 'linear-gradient(135deg, #1976d2 0%, #ff9800 100%)', border: 'none' }}
+            >
+              {validatingCodes ? (
+                <>
+                  <Spinner size="sm" className="me-1" /> Checking code…
+                </>
+              ) : selectedResource ? (
+                'Update'
+              ) : (
+                'Create'
+              )}
             </Button>
           </ModalFooter>
         </Form>
@@ -1143,52 +1531,104 @@ const AdminResources = () => {
       {/* View Modal */}
       <Modal isOpen={viewModalOpen} toggle={() => setViewModalOpen(false)} size="lg">
         <ModalHeader toggle={() => setViewModalOpen(false)}>
-          Resource Details
+          <span className="d-flex align-items-center gap-2">
+            <FaEye /> Resource Details
+          </span>
         </ModalHeader>
-        <ModalBody>
+        <ModalBody style={{ background: 'var(--card-bg)' }}>
           {selectedResource && (
             <Row>
+              <Col md={12} className="mb-2">
+                <Alert color="light" className="mb-0 py-2 small" style={{ border: '1px solid var(--border-color)' }}>
+                  View only — use <strong>Edit</strong> from the list to change this resource.
+                </Alert>
+              </Col>
               <Col md={6}>
+                <h6 style={{ fontWeight: 'bold', marginBottom: '1rem', color: '#1976d2' }}>General</h6>
                 <p><strong>Name:</strong> {selectedResource.name}</p>
                 <p><strong>Category:</strong> {selectedResource.category}</p>
+                <p><strong>College:</strong> {selectedResource.college || 'N/A'}</p>
+                <p><strong>Department:</strong> {selectedResource.department || 'N/A'}</p>
                 <p><strong>Status:</strong> {getStatusBadge(selectedResource.status)}</p>
-                <p><strong>Condition:</strong> {selectedResource.condition}</p>
-                <p><strong>Location:</strong> {selectedResource.location || 'N/A'}</p>
+                <p><strong>Condition:</strong> {selectedResource.condition || 'N/A'}</p>
               </Col>
               <Col md={6}>
-                <p><strong>Total Quantity:</strong> {selectedResource.total_quantity}</p>
-                <p><strong>Available Quantity:</strong> {selectedResource.available_quantity}</p>
-                <p><strong>Max Borrow Days:</strong> {selectedResource.max_borrow_days}</p>
-                <p><strong>Barcode:</strong> {selectedResource.barcode || 'N/A'}</p>
-                <p><strong>QR Code:</strong> {selectedResource.qr_code || 'N/A'}</p>
-                {(selectedResource.qr_code || selectedResource.barcode || selectedResource._id) && (
-                  <div className="mt-3 p-3 rounded" style={{ background: 'var(--bs-light, #f8f9fa)', display: 'inline-block' }}>
-                    <p className="small text-muted mb-2"><strong>Label preview</strong> (print or sticker)</p>
-                    <QRCodeSVG
-                      value={String(selectedResource.qr_code || selectedResource.barcode || selectedResource._id)}
-                      size={168}
-                      level="M"
-                      includeMargin
-                    />
-                  </div>
-                )}
+                <h6 style={{ fontWeight: 'bold', marginBottom: '1rem', color: '#1976d2' }}>Inventory &amp; borrowing</h6>
+                <p><strong>Location:</strong> {selectedResource.location || 'N/A'}</p>
+                <p><strong>Total quantity:</strong> {selectedResource.total_quantity ?? 'N/A'}</p>
+                <p><strong>Available quantity:</strong> {selectedResource.available_quantity ?? 'N/A'}</p>
+                <p><strong>Max borrow days:</strong> {selectedResource.max_borrow_days ?? 'N/A'}</p>
                 <p>
-                  <strong>Security Deposit:</strong>{' '}
+                  <strong>Security deposit:</strong>{' '}
                   {selectedResource.requires_payment && selectedResource.payment_amount > 0
                     ? `${Math.min(selectedResource.payment_amount, 10).toFixed(2)} OMR`
-                    : 'No deposit required'}
+                    : 'Not required'}
+                </p>
+                <p>
+                  <strong>Replacement cost (loss):</strong>{' '}
+                  {selectedResource.replacement_cost != null
+                    ? `${Number(selectedResource.replacement_cost).toFixed(2)} OMR`
+                    : 'N/A'}
                 </p>
               </Col>
+              <Col md={12} className="mt-3">
+                <h6 style={{ fontWeight: 'bold', marginBottom: '1rem', color: '#1976d2' }}>Identifiers</h6>
+                <Row>
+                  <Col md={6}>
+                    <p><strong>Barcode:</strong>{' '}
+                      <code style={{ fontSize: '0.9rem' }}>{selectedResource.barcode || 'N/A'}</code>
+                    </p>
+                    <p><strong>QR code:</strong>{' '}
+                      <code style={{ fontSize: '0.9rem' }}>{selectedResource.qr_code || 'N/A'}</code>
+                    </p>
+                  </Col>
+                  <Col md={6}>
+                    {(selectedResource.qr_code || selectedResource.barcode || selectedResource._id) && (
+                      <div
+                        className="p-3 rounded d-inline-block"
+                        style={{ background: 'var(--bg-tertiary)' }}
+                      >
+                        <p className="small text-muted mb-2"><strong>Label preview</strong></p>
+                        <QRCodeSVG
+                          value={String(selectedResource.qr_code || selectedResource.barcode || selectedResource._id)}
+                          size={140}
+                          level="M"
+                          includeMargin
+                        />
+                      </div>
+                    )}
+                  </Col>
+                </Row>
+              </Col>
               {selectedResource.description && (
-                <Col md={12}>
-                  <p><strong>Description:</strong></p>
-                  <p>{selectedResource.description}</p>
+                <Col md={12} className="mt-3">
+                  <h6 style={{ fontWeight: 'bold', marginBottom: '0.75rem', color: '#1976d2' }}>Description</h6>
+                  <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{selectedResource.description}</p>
                 </Col>
               )}
               {selectedResource.image && (
-                <Col md={12}>
-                  <p><strong>Image:</strong></p>
-                  <img src={selectedResource.image} alt={selectedResource.name} style={{ maxWidth: '100%', borderRadius: '8px' }} />
+                <Col md={12} className="mt-3">
+                  <h6 style={{ fontWeight: 'bold', marginBottom: '0.75rem', color: '#1976d2' }}>Image</h6>
+                  <img
+                    src={selectedResource.image}
+                    alt={selectedResource.name}
+                    style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '8px', objectFit: 'contain' }}
+                  />
+                </Col>
+              )}
+              {(selectedResource.created_at || selectedResource.updated_at) && (
+                <Col md={12} className="mt-3">
+                  <p className="small text-muted mb-0">
+                    {selectedResource.created_at && (
+                      <>Created: {new Date(selectedResource.created_at).toLocaleString()}</>
+                    )}
+                    {selectedResource.updated_at && (
+                      <>
+                        {selectedResource.created_at ? ' · ' : ''}
+                        Updated: {new Date(selectedResource.updated_at).toLocaleString()}
+                      </>
+                    )}
+                  </p>
                 </Col>
               )}
             </Row>

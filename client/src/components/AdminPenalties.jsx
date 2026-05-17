@@ -1,11 +1,13 @@
 import { Container, Row, Col, Card, CardBody, Button, Input, InputGroup, InputGroupText, Modal, ModalHeader, ModalBody, ModalFooter, Badge, Table, Alert, Label, FormGroup } from 'reactstrap';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { FaSearch, FaCheckCircle, FaTimes, FaEye, FaMoneyBillWave, FaExclamationTriangle, FaBan } from 'react-icons/fa';
+import { FaSearch, FaCheckCircle, FaTimes, FaEye, FaMoneyBillWave, FaExclamationTriangle, FaBan, FaCreditCard } from 'react-icons/fa';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 
 
 const AdminPenalties = () => {
+  const navigate = useNavigate();
   const [penalties, setPenalties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -174,7 +176,7 @@ const AdminPenalties = () => {
       'Minor': { bg: '#fff3e0', color: '#ff9800' },
       'Moderate': { bg: '#ffebee', color: '#f44336' },
       'Severe': { bg: '#f3e5f5', color: '#9c27b0' },
-      'Total Loss': { bg: '#212121', color: '#fff' }
+      'Total Loss': { bg: '#eceff1', color: '#37474f' }
     };
     const style = colors[level] || { bg: 'var(--bg-tertiary)', color: 'var(--text-secondary)' };
     
@@ -207,7 +209,7 @@ const AdminPenalties = () => {
               Penalties Management
             </h2>
             <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-              Manage all penalties: view details, update status, and waive penalties
+              Manage penalties: waive, view details, and confirm Cash/Card payments in Payments Management
             </p>
           </div>
         </Col>
@@ -312,6 +314,7 @@ const AdminPenalties = () => {
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Details</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Created</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Status</th>
+                    <th style={{ border: 'none', padding: '1rem', fontWeight: '600' }}>Payment</th>
                     <th style={{ border: 'none', padding: '1rem', fontWeight: '600', textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
@@ -372,8 +375,24 @@ const AdminPenalties = () => {
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
                         {getStatusBadge(penalty.status)}
                       </td>
+                      <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle' }}>
+                        {penalty.latest_payment ? (
+                          <Badge style={{
+                            background: penalty.latest_payment.status === 'Completed' ? '#e8f5e9' : '#fff3e0',
+                            color: penalty.latest_payment.status === 'Completed' ? '#4caf50' : '#ff9800',
+                            padding: '0.25rem 0.6rem',
+                            borderRadius: '12px',
+                            fontSize: '0.8rem',
+                            fontWeight: '600'
+                          }}>
+                            {penalty.latest_payment.status} ({penalty.latest_payment.payment_method})
+                          </Badge>
+                        ) : (
+                          <span style={{ color: '#999', fontSize: '0.85rem' }}>No payment yet</span>
+                        )}
+                      </td>
                       <td style={{ border: 'none', padding: '1rem', verticalAlign: 'middle', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <Button
                             size="sm"
                             onClick={() => handleView(penalty)}
@@ -392,14 +411,16 @@ const AdminPenalties = () => {
                               >
                                 <FaBan />
                               </Button>
-                              <Button
-                                size="sm"
-                                onClick={() => handleStatusChange(penalty)}
-                                style={{ background: '#4caf50', border: 'none' }}
-                                title="Mark as Paid"
-                              >
-                                <FaCheckCircle />
-                              </Button>
+                              {penalty.latest_payment?.status === 'Pending' && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => navigate('/admin/payments')}
+                                  style={{ background: '#4caf50', border: 'none' }}
+                                  title="Confirm payment in Payments Management"
+                                >
+                                  <FaCreditCard />
+                                </Button>
+                              )}
                             </>
                           )}
                           {penalty.status !== 'Pending' && (
